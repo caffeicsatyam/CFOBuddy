@@ -10,7 +10,6 @@ import {
   getCurrentUser,
   getThreadHistory,
   hasAuthToken,
-  getIndexingStatus,
   login,
   sendMessageStream,
   uploadFile,
@@ -163,29 +162,8 @@ export default function Dashboard() {
 
     try {
       const uploadResponse = await uploadFile(file);
-      updateUploadStatus(`${uploadResponse.message} Indexing your file now...`, true);
-
-      let finalStatus: { status: string; message: string } | null = null;
-      for (let attempt = 0; attempt < 60; attempt += 1) {
-        await new Promise((resolve) => setTimeout(resolve, 2000));
-        const status = await getIndexingStatus();
-
-        if (status.status === 'ready' || status.status === 'error') {
-          finalStatus = status;
-          break;
-        }
-      }
-
-      if (!finalStatus) {
-        throw new Error('Upload succeeded, but indexing is taking longer than expected.');
-      }
-
-      if (finalStatus.status === 'error') {
-        throw new Error(finalStatus.message || 'Indexing failed after upload.');
-      }
-
       updateUploadStatus(
-        finalStatus.message || `${file.name} uploaded and indexed successfully.`,
+        `${uploadResponse.message} I am processing it in the background, so you can keep chatting while embeddings are generated.`,
       );
     } catch (error) {
       updateUploadStatus(

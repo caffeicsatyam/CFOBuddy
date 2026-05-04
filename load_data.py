@@ -57,8 +57,8 @@ def maybe_coerce_numeric(series: pd.Series) -> pd.Series:
     return numeric
 
 @traceable(name="load_csvs_to_neon")
-def load_csvs_to_neon(force_reload: bool = False):
-    csv_files = glob.glob(os.path.join(DATA_FOLDER, "*.csv"))
+def load_csvs_to_neon(csv_paths: list[str] | None = None, force_reload: bool = False):
+    csv_files = csv_paths or glob.glob(os.path.join(DATA_FOLDER, "*.csv"))
 
     if not csv_files:
         logger.warning("No CSV files found in '%s/'", DATA_FOLDER)

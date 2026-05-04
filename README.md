@@ -166,6 +166,7 @@ TWELVE_DATA_API_KEY=your_key
 ### 3. Build & Run
 ```bash
 python build_index.py  # Initialize vector store
+
 python api/main.py     # Start API
 ```
 
@@ -174,4 +175,7 @@ python api/main.py     # Start API
 cd frontend
 npm install
 npm run dev
+
+
+uvicorn api.main:app --reload --host 0.0.0.0
 ```

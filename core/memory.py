@@ -1,4 +1,5 @@
 import os
+import atexit
 import psycopg
 from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
@@ -13,14 +14,20 @@ DB_URI = os.environ["DATABASE_URL"]
 # contention under concurrent requests and Neon cold-start delays.
 pool = ConnectionPool(
     DB_URI,
-    min_size=2,
+    min_size=0,
     max_size=10,
     kwargs={"autocommit": True, "prepare_threshold": 0, "row_factory": dict_row},
+    check=ConnectionPool.check_connection,
+    max_idle=60,
+    max_lifetime=300,
+    reconnect_timeout=30,
 )
 
 checkpointer = PostgresSaver(pool)
 
 checkpointer.setup()
+
+atexit.register(pool.close)
 
 def retrieve_all_threads():
     """Return all existing thread IDs from memory."""

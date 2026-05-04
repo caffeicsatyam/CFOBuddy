@@ -9,7 +9,6 @@ from core.schemas import RouteTarget
 # EMBEDDING-BASED ROUTER (Primary)
 # ══════════════════════════════════════════════════════════════════════════════
 
-# Route descriptions (embedded lazily so startup still works offline)
 ROUTE_DESCRIPTIONS = {
     RouteTarget.SQL.value: """
         Database queries, SQL, calculations, aggregations, averages, sums, counts,
@@ -99,7 +98,7 @@ def route_with_embeddings(query: str) -> str:
     best_route = max(similarities, key=similarities.get)
     confidence = similarities[best_route]
     
-    # If confidence is too low, fall back to keyword matching
+    
     if confidence < 0.3:
         return route_with_keywords(query)
     
@@ -107,7 +106,7 @@ def route_with_embeddings(query: str) -> str:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# KEYWORD FALLBACK (Tier 2 - for edge cases)
+# KEYWORD FALLBACK 
 # ══════════════════════════════════════════════════════════════════════════════
 
 SQL_KEYWORDS = frozenset([
@@ -202,7 +201,7 @@ def route_with_keywords(query: str) -> str:
     
     max_score = max(scores.values())
     
-    # If no keywords match, default to model (handles greetings, etc.)
+   
     if max_score == 0:
         return RouteTarget.MODEL.value
     

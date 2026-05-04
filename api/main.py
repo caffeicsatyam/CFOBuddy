@@ -37,7 +37,7 @@ load_dotenv()
 
 logger = configure_logging()
 
-# Config
+
 LEGACY_API_KEY = os.getenv("CFO_BUDDY_API_KEY", "").strip()
 JWT_SECRET = os.getenv("CFO_BUDDY_JWT_SECRET", "").strip() or LEGACY_API_KEY
 AUTH_USERNAME = os.getenv("CFO_BUDDY_AUTH_USERNAME", "admin").strip()
@@ -83,7 +83,7 @@ app.add_middleware(
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/login", auto_error=False)
 
-# Folders
+
 DATA_FOLDER = Path("data")
 CHARTS_FOLDER = Path("static/charts")
 ALLOWED_EXTENSIONS = {"csv", "pdf", "xlsx", "xls", "docx"}
@@ -138,6 +138,13 @@ def decode_access_token(token: str) -> dict[str, Any]:
 def verify_user(username: str, password: str) -> bool:
     return secrets.compare_digest(username, AUTH_USERNAME) and secrets.compare_digest(password, AUTH_PASSWORD)
 
+def verify_legacy_api_key_login(username: str, password: str) -> bool:
+    return (
+        bool(LEGACY_API_KEY)
+        and secrets.compare_digest(username, "legacy-api-key")
+        and secrets.compare_digest(password, LEGACY_API_KEY)
+    )
+
 def require_auth(token: Optional[str] = Security(oauth2_scheme)) -> dict[str, Any]:
     if not token:
         raise HTTPException(status_code=401, detail="Missing bearer token")
@@ -161,8 +168,17 @@ class ThreadInfo(BaseModel):
     id: str
     name: str
 
+class ThreadHistoryMessage(BaseModel):
+    role: str
+    content: str
+    chart: Optional[dict[str, Any]] = None
+
 class ThreadResponse(BaseModel):
     threads: list[ThreadInfo]
+
+class ThreadHistoryResponse(BaseModel):
+    thread_id: str
+    messages: list[ThreadHistoryMessage]
 
 class FileInfo(BaseModel):
     name: str
@@ -188,12 +204,24 @@ class UserResponse(BaseModel):
 # Status tracking
 indexing_status = {"status": "ready", "message": "Idle"}
 
-def build_index_with_status() -> None:
+def build_index_with_status(file_path: str | None = None) -> None:
     global indexing_status
-    indexing_status = {"status": "indexing", "message": "Building index"}
+    target = Path(file_path).name if file_path else "documents"
+    indexing_status = {"status": "indexing", "message": f"Indexing {target}"}
     try:
-        build_index()
-        indexing_status = {"status": "ready", "message": "Index built successfully"}
+        indexed_count = build_index([file_path] if file_path else None)
+        try:
+            from tools.search import reload_index
+
+            reload_index()
+        except Exception:
+            logger.warning("Search index cache reload failed", exc_info=True)
+
+        if indexed_count == 0:
+            message = "Document is already indexed"
+        else:
+            message = f"Indexed {indexed_count} document section(s)"
+        indexing_status = {"status": "ready", "message": message}
     except Exception as exc:
         logger.exception("Index build failed")
         indexing_status = {"status": "error", "message": str(exc)}
@@ -214,6 +242,9 @@ async def health() -> dict[str, str]:
 
 @app.post("/auth/login", response_model=TokenResponse, tags=["Auth"])
 async def login(form_data: OAuth2PasswordRequestForm = Depends()) -> TokenResponse:
+    if verify_legacy_api_key_login(form_data.username, form_data.password):
+        return TokenResponse(access_token=LEGACY_API_KEY, username="legacy-api-key")
+
     if not verify_user(form_data.username, form_data.password):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -230,38 +261,49 @@ async def read_current_user(payload: dict[str, Any] = Depends(require_auth)) -> 
         auth_type=str(payload.get("auth_type", "jwt")),
     )
 
+def parse_chart_payload(content: str) -> Optional[dict[str, Any]]:
+    for marker in ("CHART_JSON:", "CHART_DATA:"):
+        if marker not in content:
+            continue
+        try:
+            json_str = content.split(marker, maxsplit=1)[1].strip()
+            brace_count = 0
+            end_idx = 0
+            for i, ch in enumerate(json_str):
+                if ch == "{":
+                    brace_count += 1
+                elif ch == "}":
+                    brace_count -= 1
+                    if brace_count == 0:
+                        end_idx = i + 1
+                        break
+            if end_idx > 0:
+                return json.loads(json_str[:end_idx])
+            return json.loads(json_str)
+        except Exception:
+            logger.warning("Failed to parse chart payload")
+            return None
+    return None
+
+def remove_chart_payload(content: str) -> str:
+    clean = content
+    for marker in ("CHART_JSON:", "CHART_DATA:"):
+        if marker in clean:
+            clean = clean.split(marker, maxsplit=1)[0].strip()
+    return clean
+
 def parse_response(messages: list[Any]) -> tuple[str, Optional[dict[str, Any]]]:
     text = ""
     chart = None
     for msg in messages:
         content = msg.content
         if isinstance(content, str):
-            for marker in ("CHART_JSON:", "CHART_DATA:"):
-                if marker in content:
-                    try:
-                        json_str = content.split(marker, maxsplit=1)[1].strip()
-                        brace_count = 0
-                        end_idx = 0
-                        for i, ch in enumerate(json_str):
-                            if ch == '{': brace_count += 1
-                            elif ch == '}':
-                                brace_count -= 1
-                                if brace_count == 0:
-                                    end_idx = i + 1
-                                    break
-                        if end_idx > 0:
-                            chart = json.loads(json_str[:end_idx])
-                        else:
-                            chart = json.loads(json_str)
-                    except Exception:
-                        logger.warning("Failed to parse chart payload")
-                    break
+            chart_payload = parse_chart_payload(content)
+            if chart_payload is not None:
+                chart = chart_payload
             
             if getattr(msg, "type", "") == "ai":
-                clean = content
-                if "CHART_JSON:" in clean: clean = clean.split("CHART_JSON:")[0].strip()
-                if "CHART_DATA:" in clean: clean = clean.split("CHART_DATA:")[0].strip()
-                text = clean
+                text = remove_chart_payload(content)
     return text.strip(), chart
 
 def text_from_stream_content(content: Any) -> str:
@@ -398,24 +440,50 @@ async def upload_file(file: UploadFile = File(...), background_tasks: Background
     content = await file.read()
     filepath.write_bytes(content)
     if background_tasks is None: background_tasks = BackgroundTasks()
-    if filepath.suffix.lower() == ".csv": background_tasks.add_task(load_csvs_to_neon)
-    background_tasks.add_task(build_index_with_status)
+    if filepath.suffix.lower() == ".csv": background_tasks.add_task(load_csvs_to_neon, [str(filepath)], True)
+    background_tasks.add_task(build_index_with_status, str(filepath))
     return UploadResponse(message=f"'{file.filename}' uploaded successfully", filename=file.filename)
 
-@router.get("/threads/{thread_id}/history")
-async def get_history(thread_id: str) -> dict[str, Any]:
+@router.get("/threads/{thread_id}/history", response_model=ThreadHistoryResponse)
+async def get_history(thread_id: str) -> ThreadHistoryResponse:
     from core.graph import CFOBuddy
     config = {"configurable": {"thread_id": thread_id}}
     try:
         state = CFOBuddy.get_state(config)
         messages = state.values.get("messages", [])
-        return {
-            "thread_id": thread_id,
-            "messages": [
-                {"role": msg.type, "content": msg.content if isinstance(msg.content, str) else str(msg.content)}
-                for msg in messages if msg.type in ["human", "ai"]
-            ],
-        }
+        history_messages: list[ThreadHistoryMessage] = []
+        pending_chart: Optional[dict[str, Any]] = None
+        last_ai_index: Optional[int] = None
+
+        for msg in messages:
+            content = msg.content if isinstance(msg.content, str) else text_from_stream_content(msg.content)
+            chart_payload = parse_chart_payload(content) if content else None
+            if chart_payload is not None:
+                pending_chart = chart_payload
+
+            msg_type = getattr(msg, "type", "")
+            if msg_type not in ["human", "ai"]:
+                continue
+
+            clean_content = remove_chart_payload(content)
+            chart = None
+            if msg_type == "ai" and pending_chart is not None:
+                chart = pending_chart
+                pending_chart = None
+
+            if msg_type == "ai" and not clean_content and chart is None:
+                continue
+
+            history_messages.append(
+                ThreadHistoryMessage(role=msg_type, content=clean_content, chart=chart)
+            )
+            if msg_type == "ai":
+                last_ai_index = len(history_messages) - 1
+
+        if pending_chart is not None and last_ai_index is not None:
+            history_messages[last_ai_index].chart = pending_chart
+
+        return ThreadHistoryResponse(thread_id=thread_id, messages=history_messages)
     except Exception as exc:
         raise HTTPException(status_code=404, detail=str(exc))
 
