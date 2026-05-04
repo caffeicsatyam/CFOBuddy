@@ -1,8 +1,13 @@
 export type MessageRole = 'user' | 'assistant';
 
 export interface ChartData {
-  type: string;
-  data: Record<string, unknown>;
+  type?: string;
+  title?: string;
+  url?: string;
+  file_url?: string;
+  chart_url?: string;
+  path?: string;
+  data?: Record<string, unknown>;
   layout?: Record<string, unknown>;
 }
 
@@ -55,6 +60,7 @@ export interface ThreadsAPIResponse {
 export interface ThreadHistoryMessage {
   role: 'human' | 'ai';
   content: string;
+  chart?: ChartData | null;
 }
 
 export interface ThreadHistoryAPIResponse {

@@ -2,6 +2,7 @@
 
 import Image from 'next/image';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import type { KeyboardEvent } from 'react';
 
 import { getApiBaseUrl } from '../lib/api';
 import type { Message } from '../lib/types';
@@ -72,6 +73,16 @@ export default function ChatArea({ messages, isTyping, onSuggestionClick }: Prop
   const bottomRef = useRef<HTMLDivElement>(null);
   const [activeChart, setActiveChart] = useState<ChartPreview | null>(null);
   const hasStreamingMessage = messages.some((message) => message.isLoading);
+
+  const openChartFromKeyboard = (
+    event: KeyboardEvent<HTMLDivElement>,
+    chartPreview: ChartPreview,
+  ) => {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      setActiveChart(chartPreview);
+    }
+  };
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -145,10 +156,12 @@ export default function ChatArea({ messages, isTyping, onSuggestionClick }: Prop
                     </div>
 
                     {chartPreview && (
-                      <button
-                        type="button"
+                      <div
+                        role="button"
+                        tabIndex={0}
                         className={styles.chartCard}
                         onClick={() => setActiveChart(chartPreview)}
+                        onKeyDown={(event) => openChartFromKeyboard(event, chartPreview)}
                       >
                         <div className={styles.chartCardHeader}>
                           <div className={styles.chartIcon}></div>
@@ -178,7 +191,7 @@ export default function ChatArea({ messages, isTyping, onSuggestionClick }: Prop
                           />
                         )}
                         <span className={styles.chartHint}>Click to expand</span>
-                      </button>
+                      </div>
                     )}
                   </div>
                 </div>
@@ -199,10 +212,16 @@ export default function ChatArea({ messages, isTyping, onSuggestionClick }: Prop
       )}
 
       {activeChart && (
-        <button
-          type="button"
+        <div
+          role="button"
+          tabIndex={-1}
           className={styles.chartModal}
           onClick={() => setActiveChart(null)}
+          onKeyDown={(event) => {
+            if (event.key === 'Escape') {
+              setActiveChart(null);
+            }
+          }}
         >
           <div
             className={styles.chartModalContent}
@@ -241,7 +260,7 @@ export default function ChatArea({ messages, isTyping, onSuggestionClick }: Prop
               />
             )}
           </div>
-        </button>
+        </div>
       )}
     </div>
   );

@@ -10,8 +10,10 @@ import {
   getCurrentUser,
   getThreadHistory,
   hasAuthToken,
+  getIndexingStatus,
   login,
   sendMessageStream,
+  uploadFile,
 } from '@/lib/api';
 import { createId } from '@/lib/id';
 import type { AuthUser, Message } from '@/lib/types';
@@ -27,6 +29,7 @@ export default function Dashboard() {
   const [username, setUsername] = useState('admin');
   const [password, setPassword] = useState('');
   const [isLoggingIn, setIsLoggingIn] = useState(false);
+  const [isUploadingFile, setIsUploadingFile] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   // Track which thread IDs are known to exist on the backend
   const [knownThreadIds, setKnownThreadIds] = useState<Set<string>>(new Set());
@@ -49,6 +52,7 @@ export default function Dashboard() {
         id: `${threadId}-${index}-${createId()}`,
         role: message.role === 'human' ? 'user' : 'assistant',
         content: message.content,
+        chart: message.chart,
         timestamp: new Date(),
       }));
       setMessages(mappedMessages);
@@ -123,6 +127,73 @@ export default function Dashboard() {
     setMessages([]);
     setCurrentThreadId('main');
     setAuthError(null);
+  }, []);
+
+  const handleFileUpload = useCallback(async (file: File) => {
+    const uploadMessageId = createId();
+    const assistantId = createId();
+
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: uploadMessageId,
+        role: 'user',
+        content: `Upload file: ${file.name}`,
+        timestamp: new Date(),
+      },
+      {
+        id: assistantId,
+        role: 'assistant',
+        content: `Uploading ${file.name}...`,
+        timestamp: new Date(),
+        isLoading: true,
+      },
+    ]);
+    setIsUploadingFile(true);
+
+    const updateUploadStatus = (content: string, isLoading = false) => {
+      setMessages((prev) =>
+        prev.map((message) =>
+          message.id === assistantId
+            ? { ...message, content, isLoading }
+            : message,
+        ),
+      );
+    };
+
+    try {
+      const uploadResponse = await uploadFile(file);
+      updateUploadStatus(`${uploadResponse.message} Indexing your file now...`, true);
+
+      let finalStatus: { status: string; message: string } | null = null;
+      for (let attempt = 0; attempt < 60; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+        const status = await getIndexingStatus();
+
+        if (status.status === 'ready' || status.status === 'error') {
+          finalStatus = status;
+          break;
+        }
+      }
+
+      if (!finalStatus) {
+        throw new Error('Upload succeeded, but indexing is taking longer than expected.');
+      }
+
+      if (finalStatus.status === 'error') {
+        throw new Error(finalStatus.message || 'Indexing failed after upload.');
+      }
+
+      updateUploadStatus(
+        finalStatus.message || `${file.name} uploaded and indexed successfully.`,
+      );
+    } catch (error) {
+      updateUploadStatus(
+        `Upload failed: ${error instanceof Error ? error.message : 'Unable to upload file.'}`,
+      );
+    } finally {
+      setIsUploadingFile(false);
+    }
   }, []);
 
   const handleSend = useCallback(async () => {
@@ -508,6 +579,8 @@ export default function Dashboard() {
             onChange={setInputVal}
             onSend={handleSend}
             loading={isTyping}
+            uploadLoading={isUploadingFile}
+            onFileSelect={handleFileUpload}
           />
         </div>
       </main>
