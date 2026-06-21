@@ -11,6 +11,7 @@ import {
   getThreadHistory,
   hasAuthToken,
   login,
+  register,
   sendMessageStream,
   uploadFile,
 } from '@/lib/api';
@@ -30,6 +31,7 @@ export default function Dashboard() {
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [isUploadingFile, setIsUploadingFile] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [isRegisterMode, setIsRegisterMode] = useState(false);
   // Track which thread IDs are known to exist on the backend
   const [knownThreadIds, setKnownThreadIds] = useState<Set<string>>(new Set());
 
@@ -120,6 +122,31 @@ export default function Dashboard() {
     }
   }, [password, username]);
 
+  const handleRegister = useCallback(async () => {
+    if (!username.trim() || !password.trim()) {
+      setAuthError('Enter both username and password.');
+      return;
+    }
+
+    setIsLoggingIn(true);
+    setAuthError(null);
+
+    try {
+      await register(username.trim(), password);
+      // Auto-login after successful registration
+      await login(username.trim(), password);
+      const me = await getCurrentUser();
+      setUser(me);
+      setPassword('');
+      setIsRegisterMode(false);
+    } catch (error) {
+      setAuthError(error instanceof Error ? error.message : 'Registration failed');
+    } finally {
+      setIsLoggingIn(false);
+      setAuthLoading(false);
+    }
+  }, [password, username]);
+
   const handleLogout = useCallback(() => {
     clearAuthToken();
     setUser(null);
@@ -161,10 +188,13 @@ export default function Dashboard() {
     };
 
     try {
-      const uploadResponse = await uploadFile(file);
+      const uploadResponse = await uploadFile(file, currentThreadId);
       updateUploadStatus(
         `${uploadResponse.message} I am processing it in the background, so you can keep chatting while embeddings are generated.`,
       );
+      if (uploadResponse.thread_id) {
+        setKnownThreadIds((prev) => new Set([...prev, uploadResponse.thread_id as string]));
+      }
     } catch (error) {
       updateUploadStatus(
         `Upload failed: ${error instanceof Error ? error.message : 'Unable to upload file.'}`,
@@ -172,7 +202,7 @@ export default function Dashboard() {
     } finally {
       setIsUploadingFile(false);
     }
-  }, []);
+  }, [currentThreadId]);
 
   const handleSend = useCallback(async () => {
     if (!inputVal.trim()) return;
@@ -327,8 +357,9 @@ export default function Dashboard() {
     );
   }
 
-  /* ── Login screen ──────────────────────────────────────── */
+  /* ── Login / Register screen ─────────────────────────────── */
   if (!user) {
+    const submitHandler = isRegisterMode ? handleRegister : handleLogin;
     return (
       <main className="login-screen">
         <section className="login-card">
@@ -336,7 +367,11 @@ export default function Dashboard() {
             <span className="login-logo">✦</span>
             <h1>CFOBuddy</h1>
           </div>
-          <p className="login-subtitle">Sign in to your financial assistant</p>
+          <p className="login-subtitle">
+            {isRegisterMode
+              ? 'Create a new account'
+              : 'Sign in to your financial assistant'}
+          </p>
 
           <div className="login-fields">
             <label className="login-label">
@@ -359,10 +394,10 @@ export default function Dashboard() {
                 onChange={(event) => setPassword(event.target.value)}
                 onKeyDown={(event) => {
                   if (event.key === 'Enter' && !isLoggingIn) {
-                    void handleLogin();
+                    void submitHandler();
                   }
                 }}
-                autoComplete="current-password"
+                autoComplete={isRegisterMode ? 'new-password' : 'current-password'}
                 placeholder="Enter password"
               />
             </label>
@@ -374,16 +409,40 @@ export default function Dashboard() {
 
           <button
             className="login-btn"
-            onClick={() => void handleLogin()}
+            onClick={() => void submitHandler()}
             disabled={isLoggingIn}
           >
             {isLoggingIn ? (
               <span className="login-btn-loading">
                 <span className="login-spinner" />
-                Signing in…
+                {isRegisterMode ? 'Creating account…' : 'Signing in…'}
               </span>
-            ) : 'Continue'}
+            ) : isRegisterMode ? 'Create Account' : 'Continue'}
           </button>
+
+          <p className="login-toggle">
+            {isRegisterMode ? (
+              <>
+                Already have an account?{' '}
+                <button
+                  className="login-toggle-btn"
+                  onClick={() => { setIsRegisterMode(false); setAuthError(null); }}
+                >
+                  Sign In
+                </button>
+              </>
+            ) : (
+              <>
+                Don&apos;t have an account?{' '}
+                <button
+                  className="login-toggle-btn"
+                  onClick={() => { setIsRegisterMode(true); setAuthError(null); setUsername(''); }}
+                >
+                  Sign Up
+                </button>
+              </>
+            )}
+          </p>
 
           <p className="login-footnote">
             Secured with JWT authentication
@@ -499,6 +558,26 @@ export default function Dashboard() {
             border-top-color: #fff;
             border-radius: 50%;
             animation: spin 0.6s linear infinite;
+          }
+          .login-toggle {
+            text-align: center;
+            font-size: 0.875rem;
+            color: #999;
+            margin-top: 0.75rem;
+          }
+          .login-toggle-btn {
+            background: none;
+            border: none;
+            color: #10a37f;
+            cursor: pointer;
+            font-size: 0.875rem;
+            font-weight: 600;
+            font-family: inherit;
+            text-decoration: underline;
+            padding: 0;
+          }
+          .login-toggle-btn:hover {
+            color: #1a8a6a;
           }
           .login-footnote {
             text-align: center;

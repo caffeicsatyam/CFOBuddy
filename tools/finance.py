@@ -98,6 +98,8 @@ _YF_ALIASES: dict[str, str] = {
     "DOWJONES":     "^DJI",
     "NASDAQ":       "^IXIC",
     "VIX":          "^VIX",
+    "GOOGLE":       "GOOGL",
+    "ALPHABET":     "GOOGL",
     # 
     "BTC":          "BTC-USD",
     "ETH":          "ETH-USD",
@@ -124,6 +126,8 @@ _TD_ALIASES: dict[str, str | None] = {
     "DOWJONES":     "DJI",
     "NASDAQ":       "IXIC",
     "VIX":          "VIX",
+    "GOOGLE":       "GOOGL",
+    "ALPHABET":     "GOOGL",
     # Crypto
     "BTC":          "BTC/USD",
     "ETH":          "ETH/USD",
@@ -375,6 +379,54 @@ def _td_price_history(symbol: str, period: str, limit: int) -> str:
         return f"Twelve Data error: {exc}"
 
 
+def _yf_price_history(symbol: str, period: str, limit: int) -> str:
+    interval_map = {
+        "1min": ("5d", "1m"),
+        "5min": ("1mo", "5m"),
+        "15min": ("1mo", "15m"),
+        "30min": ("1mo", "30m"),
+        "1h": ("3mo", "1h"),
+        "2h": ("3mo", "2h"),
+        "4h": ("6mo", "4h"),
+        "1day": ("6mo", "1d"),
+        "1week": ("2y", "1wk"),
+        "1month": ("5y", "1mo"),
+    }
+    yf_period, interval = interval_map.get(period, ("6mo", "1d"))
+    ticker = yf.Ticker(symbol)
+    df = _with_timeout(
+        lambda: ticker.history(period=yf_period, interval=interval),
+        20,
+    )
+    if df is None or df.empty:
+        return f"No price history found for {symbol}."
+
+    result = [f"Price History - {symbol} ({period if period in _VALID_INTERVALS else '1day'})"]
+    for index, row in df.tail(limit).iterrows():
+        result.append(
+            f"{str(index)[:10]} | O: {row.get('Open')} "
+            f"H: {row.get('High')} L: {row.get('Low')} "
+            f"C: {row.get('Close')} V: {row.get('Volume', 'N/A')}"
+        )
+    return "\n".join(result)
+
+
+def _best_history(symbol: str, period: str, limit: int) -> str:
+    td_result = _td_price_history(symbol, period, limit)
+    if not any(
+        marker in td_result.lower()
+        for marker in ("twelve data error", "timed out", "no price history", "not available")
+    ):
+        return td_result
+
+    try:
+        return _yf_price_history(symbol, period, limit)
+    except TimeoutError:
+        return td_result
+    except Exception:
+        return td_result
+
+
 def _td_quote(symbol: str, **_) -> str:
     td_symbol = _resolve_td_symbol(symbol)
     if td_symbol is None:
@@ -426,7 +478,7 @@ HANDLERS = {
     "ratings":  _yf_ratings,
     "news":     _yf_news,
     "profile":  _yf_profile,
-    "history":  _td_price_history,
+    "history":  _best_history,
     "realtime": _td_quote,
 }
 

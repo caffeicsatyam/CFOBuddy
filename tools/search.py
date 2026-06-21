@@ -7,8 +7,10 @@ from dotenv import load_dotenv
 from langchain_core.tools import tool
 from llama_index.core import Settings, VectorStoreIndex
 from llama_index.core.query_engine import RetrieverQueryEngine
+from llama_index.core.vector_stores import MetadataFilters, ExactMatchFilter
 from llama_index.llms.groq import Groq
 from llama_index.vector_stores.postgres import PGVectorStore
+from langchain_core.runnables import RunnableConfig
 from pydantic import BaseModel
 from sqlalchemy import make_url
 
@@ -93,22 +95,7 @@ def get_index() -> VectorStoreIndex:
 
 def reload_index() -> None:
     get_index.cache_clear()
-    get_query_engine.cache_clear()
     logger.info("Index reloaded")
-
-
-@lru_cache(maxsize=1)
-def get_query_engine() -> RetrieverQueryEngine:
-    index = get_index()
-    retriever = index.as_retriever(
-        similarity_top_k=5,
-        similarity_cutoff=0.5,
-        vector_store_query_mode="hybrid",
-    )
-    return RetrieverQueryEngine.from_args(
-        retriever=retriever,
-        response_mode="compact",
-    )
 
 
 def clean_query(query: str) -> str:
@@ -135,15 +122,16 @@ class SearchInput(BaseModel):
 
 
 @tool(args_schema=SearchInput)
-def search_financial_docs(query: str) -> str:
+def search_financial_docs(query: str, config: RunnableConfig) -> str:
     """Search internal financial documents using hybrid semantic + keyword search."""
 
     start = time.time()
     query = clean_query(query)
+    username = config.get("configurable", {}).get("username", "admin")
+    filters = MetadataFilters(filters=[ExactMatchFilter(key="username", value=username)])
 
     try:
         index = get_index()
-        query_engine = get_query_engine()
     except Exception as exc:
         logger.exception("Search backend is not ready")
         return f"Search is unavailable right now: {exc}"
@@ -153,11 +141,13 @@ def search_financial_docs(query: str) -> str:
             similarity_top_k=10,
             similarity_cutoff=0.0,
             vector_store_query_mode="hybrid",
+            filters=filters,
         )
         candidates = retriever.retrieve(query)
     except Exception as exc:
         logger.exception("Retriever failed, falling back to compact query engine: %s", exc)
         try:
+            query_engine = index.as_query_engine(filters=filters, response_mode="compact")
             response = query_engine.query(query)
             return str(response)
         except Exception as query_exc:
@@ -173,6 +163,7 @@ def search_financial_docs(query: str) -> str:
         reranked = []
 
     try:
+        query_engine = index.as_query_engine(similarity_top_k=5, filters=filters, response_mode="compact")
         response = query_engine.query(query)
     except Exception as exc:
         logger.exception("Query engine failed: %s", exc)

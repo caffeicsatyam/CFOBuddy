@@ -87,6 +87,23 @@ function headers(extra: Record<string, string> = {}): HeadersInit {
   };
 }
 
+export async function register(username: string, password: string): Promise<AuthUser> {
+  const baseUrl = getApiBaseUrl();
+  const res = await fetch(`${baseUrl}/auth/register`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ username, password }),
+  });
+
+  if (!res.ok) {
+    await parseError(res, 'Registration failed');
+  }
+
+  return res.json() as Promise<AuthUser>;
+}
+
 export async function login(username: string, password: string): Promise<LoginAPIResponse> {
   const baseUrl = getApiBaseUrl();
   const form = new URLSearchParams();
@@ -268,10 +285,13 @@ export async function getFiles(): Promise<FilesAPIResponse> {
   return res.json() as Promise<FilesAPIResponse>;
 }
 
-export async function uploadFile(file: File): Promise<UploadAPIResponse> {
+export async function uploadFile(file: File, threadId?: string): Promise<UploadAPIResponse> {
   const baseUrl = getApiBaseUrl();
   const form = new FormData();
   form.append('file', file);
+  if (threadId) {
+    form.append('thread_id', threadId);
+  }
 
   const token = getStoredToken();
   const res = await fetch(`${baseUrl}/upload`, {

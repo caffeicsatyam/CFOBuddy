@@ -19,4 +19,4 @@ class RouterDecision(BaseModel):
 
 class State(MessagesState):
     """Graph state - extends MessagesState with any custom fields."""
-    pass
+    tool_call_count: int = 0

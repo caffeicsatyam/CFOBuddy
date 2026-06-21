@@ -5,6 +5,7 @@ from sqlalchemy import create_engine, inspect
 from dotenv import load_dotenv
 from cfobuddy_logging import configure_logging
 from langsmith import traceable
+from core.user_scope import user_storage_key
 
 load_dotenv()
 logger = configure_logging()
@@ -24,8 +25,13 @@ def sanitize_table_name(filename: str) -> str:
     """Convert filename to valid PostgreSQL table name."""
     name = os.path.splitext(filename)[0]
     name = name.lower()
-    name = name.replace(" ", "_").replace("-", "_").replace(".", "_")
+    name = name.replace(" ", "_").replace("-", "_").replace(".", "_").replace("/", "_").replace("\\", "_")
     return name
+
+
+def user_table_prefix(username: str) -> str:
+    """Return a SQL-safe prefix for user-owned uploaded tables."""
+    return sanitize_table_name(username)
 
 
 def maybe_coerce_numeric(series: pd.Series) -> pd.Series:
@@ -57,11 +63,12 @@ def maybe_coerce_numeric(series: pd.Series) -> pd.Series:
     return numeric
 
 @traceable(name="load_csvs_to_neon")
-def load_csvs_to_neon(csv_paths: list[str] | None = None, force_reload: bool = False):
-    csv_files = csv_paths or glob.glob(os.path.join(DATA_FOLDER, "*.csv"))
+def load_csvs_to_neon(csv_paths: list[str] | None = None, force_reload: bool = False, username: str = "admin"):
+    user_folder = os.path.join(DATA_FOLDER, user_storage_key(username))
+    csv_files = csv_paths or glob.glob(os.path.join(user_folder, "*.csv"))
 
     if not csv_files:
-        logger.warning("No CSV files found in '%s/'", DATA_FOLDER)
+        logger.warning("No CSV files found in '%s/'", user_folder)
         return []
 
     logger.info("Found %d CSV files", len(csv_files))
@@ -72,6 +79,7 @@ def load_csvs_to_neon(csv_paths: list[str] | None = None, force_reload: bool = F
     for filepath in csv_files:
         filename = os.path.basename(filepath)
         table_name = sanitize_table_name(filename)
+        table_name = f"{user_table_prefix(username)}_{table_name}"
 
         if not force_reload and table_name in existing_tables:
             continue
@@ -114,17 +122,17 @@ def load_csvs_to_neon(csv_paths: list[str] | None = None, force_reload: bool = F
     return loaded_tables
 
 
-_tables_loaded = False
+_tables_loaded = {}
 
 
-def ensure_csv_tables_loaded() -> list[str]:
+def ensure_csv_tables_loaded(username: str = "admin") -> list[str]:
     """Ensure CSV files in data/ are available as Neon tables for SQL tools."""
     global _tables_loaded
-    if _tables_loaded:
+    if _tables_loaded.get(username):
         return []
     try:
-        result = load_csvs_to_neon(force_reload=False)
-        _tables_loaded = True
+        result = load_csvs_to_neon(force_reload=False, username=username)
+        _tables_loaded[username] = True
         return result
     except Exception as exc:
         logger.error("Failed to ensure CSV tables are loaded: %s", exc)

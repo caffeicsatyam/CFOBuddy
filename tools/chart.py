@@ -1,5 +1,6 @@
 import json
 import os
+import re
 from datetime import datetime
 from typing import Literal, Optional, Union
 from pathlib import Path
@@ -315,11 +316,11 @@ def prepare_chart_data(
     limit: int = 100,
 ) -> str:
     """
-    Transform a sql_query result string into JSON ready for generate_chart.
-    Call this BEFORE generate_chart when working from SQL output.
+    Transform a sql_query result or get_financial_data history result into JSON ready for generate_chart.
+    Call this BEFORE generate_chart when working from SQL output or stock price history.
 
     Args:
-        sql_result: The formatted result string returned by sql_query
+        sql_result: The formatted result string returned by sql_query or get_financial_data(data_type="history")
         x_column:   Column name to use as x-axis / labels
         y_column:   Column name to use as y-axis / values
         limit:      Max data points to return (default 100)
@@ -328,6 +329,10 @@ def prepare_chart_data(
         JSON string of [{x_column: ..., y_column: ...}, ...] ready for generate_chart
     """
     try:
+        finance_data = _parse_finance_history(sql_result, x_column, y_column, limit)
+        if finance_data:
+            return json.dumps(finance_data)
+
         lines = sql_result.strip().split("\n")
 
         # Find the header line (contains | but not a separator)
@@ -361,6 +366,46 @@ def prepare_chart_data(
 
     except Exception:
         return json.dumps([])
+
+
+def _parse_finance_history(result: str, x_column: str, y_column: str, limit: int) -> list[dict]:
+    """Parse get_financial_data(data_type='history') output into chart rows."""
+    metric_aliases = {
+        "open": "open",
+        "o": "open",
+        "high": "high",
+        "h": "high",
+        "low": "low",
+        "l": "low",
+        "close": "close",
+        "c": "close",
+        "price": "close",
+        "volume": "volume",
+        "v": "volume",
+    }
+    requested_metric = metric_aliases.get(y_column.strip().lower(), y_column.strip().lower())
+    x_key = x_column.strip() or "datetime"
+    y_key = y_column.strip() or requested_metric
+    rows: list[dict] = []
+
+    for raw_line in result.strip().splitlines():
+        line = raw_line.strip()
+        if "|" not in line or line.lower().startswith("price history"):
+            continue
+
+        date_part, values_part = line.split("|", 1)
+        values: dict[str, object] = {}
+        for key, value in re.findall(r"\b([OHLCV]):\s*([^\s]+)", values_part, flags=re.IGNORECASE):
+            normalized_key = metric_aliases.get(key.strip().lower())
+            if normalized_key:
+                values[normalized_key] = _parse_number(value)
+
+        if requested_metric in values:
+            rows.append({x_key: date_part.strip(), y_key: values[requested_metric]})
+            if len(rows) >= limit:
+                break
+
+    return sorted(rows, key=lambda row: str(row.get(x_key, "")))
 
 
 def _parse_number(value: str):

@@ -2,27 +2,29 @@ import os
 import json
 from dotenv import load_dotenv
 from langchain_core.tools import tool
+from langchain_core.runnables import RunnableConfig
 from sqlalchemy import text, inspect
-from load_data import ensure_csv_tables_loaded, engine
+from load_data import ensure_csv_tables_loaded, engine, user_table_prefix
 
 load_dotenv()
 INTERNAL_TABLE_PREFIXES = ("checkpoint",)
 INTERNAL_TABLE_NAMES = {"charts"}
 
-def get_schema_context() -> str:
+def get_schema_context(username: str = "admin") -> str:
     """Return schema info for LLM context."""
-    tables = get_available_tables()
+    tables = get_available_tables(username)
     context = "Database Schema:\n"
     for table, cols in tables.items():
         context += f"  {table}: {', '.join(cols)}\n"
     return context
 
 
-def get_available_tables() -> dict:
+def get_available_tables(username: str = "admin") -> dict:
     """Get all tables and their columns from Neon."""
-    ensure_csv_tables_loaded()
+    ensure_csv_tables_loaded(username)
     inspector = inspect(engine)
     tables = {}
+    prefix = f"{user_table_prefix(username)}_"
     for table_name in inspector.get_table_names():
         if (
             "embed" in table_name
@@ -32,8 +34,9 @@ def get_available_tables() -> dict:
             or table_name.startswith(INTERNAL_TABLE_PREFIXES)
         ):
             continue
-        columns = [col["name"] for col in inspector.get_columns(table_name)]
-        tables[table_name] = columns
+        if table_name.startswith(prefix):
+            columns = [col["name"] for col in inspector.get_columns(table_name)]
+            tables[table_name] = columns
     return tables
 
 
@@ -100,7 +103,7 @@ CORR() Function Hint:
 
 
 @tool
-def sql_query(sql: str) -> str:
+def sql_query(sql: str, config: RunnableConfig) -> str:
     """
     Execute a SELECT query on the PostgreSQL (Neon) database.
 
@@ -134,10 +137,12 @@ def sql_query(sql: str) -> str:
     if not sql_clean.startswith("SELECT") and not sql_clean.startswith("WITH"):
         return "Only SELECT queries are allowed for safety."
 
+    username = config.get("configurable", {}).get("username", "admin")
+
     try:
         # FIX: call ensure_csv_tables_loaded() once here; removed the redundant
         # second call that was happening inside the error handler via get_available_tables().
-        ensure_csv_tables_loaded()
+        ensure_csv_tables_loaded(username)
         with engine.connect() as conn:
             result = conn.execute(text(sql))
             rows = result.fetchall()
@@ -150,7 +155,7 @@ def sql_query(sql: str) -> str:
 
         # Re-use already-loaded table info — don't call ensure_csv_tables_loaded() again.
         try:
-            tables = get_available_tables()
+            tables = get_available_tables(username)
             table_info = "\n".join([f"  - {t}: {', '.join(cols)}" for t, cols in tables.items()])
         except Exception:
             table_info = "(could not retrieve table list)"
@@ -164,13 +169,14 @@ def sql_query(sql: str) -> str:
 
 
 @tool
-def list_tables() -> str:
+def list_tables(config: RunnableConfig) -> str:
     """
     List all available database tables and their columns.
     Use this when you need to know what structured data is available for SQL queries.
     """
     try:
-        tables = get_available_tables()
+        username = config.get("configurable", {}).get("username", "admin")
+        tables = get_available_tables(username)
         if not tables:
             return "No tables found. Run: python load_data.py"
 

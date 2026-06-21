@@ -75,6 +75,7 @@ export interface FilesAPIResponse {
 export interface UploadAPIResponse {
   message: string;
   filename: string;
+  thread_id?: string | null;
 }
 
 export type StreamTokenCallback = (token: string) => void;

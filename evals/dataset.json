@@ -1,0 +1,122 @@
+[
+  {
+    "id": "Q01",
+    "query": "What is the current stock price of Apple?",
+    "type": "factual",
+    "expected_route": "finance_node",
+    "expected_tools": ["get_financial_data"],
+    "reference_answer": "The current stock price of Apple (AAPL) should be retrieved using live market data via the get_financial_data tool with data_type 'quote'."
+  },
+  {
+    "id": "Q02",
+    "query": "What is Tesla's current market cap and PE ratio?",
+    "type": "factual",
+    "expected_route": "finance_node",
+    "expected_tools": ["get_financial_data"],
+    "reference_answer": "Tesla's market cap and PE ratio should be retrieved from the get_financial_data tool using data_type 'metrics' or 'quote' for ticker TSLA."
+  },
+  {
+    "id": "Q03",
+    "query": "Compare the earnings of Microsoft and Google over the last year.",
+    "type": "relational",
+    "expected_route": "finance_node",
+    "expected_tools": ["get_financial_data"],
+    "reference_answer": "Earnings comparison requires calling get_financial_data with data_type 'income' for both MSFT and GOOGL, then presenting revenue, net income, and EPS side by side."
+  },
+  {
+    "id": "Q04",
+    "query": "What is the average revenue per customer grouped by region in our sales data?",
+    "type": "analytical",
+    "expected_route": "sql_node",
+    "expected_tools": ["sql_query"],
+    "reference_answer": "This requires an SQL GROUP BY query on the sales/financials table, calculating AVG(revenue) grouped by region."
+  },
+  {
+    "id": "Q05",
+    "query": "Calculate the correlation between marketing spend and total sales.",
+    "type": "analytical",
+    "expected_route": "sql_node",
+    "expected_tools": ["sql_query"],
+    "reference_answer": "This requires using the PostgreSQL CORR() function with a CTE to pivot the data. The agent should call list_tables first if unsure of the schema, then construct the correlation query."
+  },
+  {
+    "id": "Q06",
+    "query": "Show me the top 5 months by total sales from our financial data.",
+    "type": "analytical",
+    "expected_route": "sql_node",
+    "expected_tools": ["sql_query"],
+    "reference_answer": "Requires SQL: SELECT month, SUM(sales) as total FROM financials GROUP BY month ORDER BY total DESC LIMIT 5."
+  },
+  {
+    "id": "Q07",
+    "query": "What are the latest news about Federal Reserve interest rate decisions?",
+    "type": "thematic",
+    "expected_route": "web_search_node",
+    "expected_tools": ["web_search"],
+    "reference_answer": "The agent should use the web_search tool to find current news articles about Federal Reserve interest rate decisions and summarize the key points with citations."
+  },
+  {
+    "id": "Q08",
+    "query": "Who won the recent presidential election?",
+    "type": "factual",
+    "expected_route": "web_search_node",
+    "expected_tools": ["web_search"],
+    "reference_answer": "The agent should use web_search to find the most recent presidential election results and provide the winner's name with context."
+  },
+  {
+    "id": "Q09",
+    "query": "According to our uploaded documents, what are the key risk factors mentioned in the annual report?",
+    "type": "retrieval",
+    "expected_route": "model",
+    "expected_tools": ["search_financial_docs"],
+    "reference_answer": "The agent should use search_financial_docs to retrieve relevant sections from the uploaded annual report PDF and summarize the key risk factors mentioned."
+  },
+  {
+    "id": "Q10",
+    "query": "Look up the details for customer ID 12345.",
+    "type": "retrieval",
+    "expected_route": "model",
+    "expected_tools": ["exact_lookup"],
+    "reference_answer": "The agent should use exact_lookup with the customer ID to retrieve the customer record and present it clearly."
+  },
+  {
+    "id": "Q11",
+    "query": "Hello there! How are you doing today?",
+    "type": "conversational",
+    "expected_route": "model",
+    "expected_tools": [],
+    "reference_answer": "The agent should respond with a friendly greeting without calling any tools, as this is casual conversation."
+  },
+  {
+    "id": "Q12",
+    "query": "What files do we have available in the system?",
+    "type": "retrieval",
+    "expected_route": "model",
+    "expected_tools": ["list_available_files"],
+    "reference_answer": "The agent should call list_available_files and present the available documents (CSVs, PDFs, etc.) in a clear format."
+  },
+  {
+    "id": "Q13",
+    "query": "What tables are available in the database and what columns do they have?",
+    "type": "analytical",
+    "expected_route": "sql_node",
+    "expected_tools": ["list_tables"],
+    "reference_answer": "The agent should call list_tables to retrieve all available database tables and their column schemas, then present them clearly."
+  },
+  {
+    "id": "Q14",
+    "query": "Plot the monthly sales trend from our financial data as a chart.",
+    "type": "analytical",
+    "expected_route": "sql_node",
+    "expected_tools": ["sql_query", "generate_chart"],
+    "reference_answer": "The agent should first query monthly sales data via sql_query, then call generate_chart to create a line chart showing the trend over time."
+  },
+  {
+    "id": "Q15",
+    "query": "What is NVIDIA's analyst rating and recent stock performance?",
+    "type": "relational",
+    "expected_route": "finance_node",
+    "expected_tools": ["get_financial_data"],
+    "reference_answer": "The agent should call get_financial_data for NVDA with data_type 'ratings' and 'quote' to get analyst consensus and recent price history."
+  }
+]

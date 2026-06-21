@@ -2,9 +2,25 @@ import os
 import glob
 import pandas as pd
 from langchain_core.tools import tool
+from langchain_core.runnables import RunnableConfig
 from cfobuddy_logging import configure_logging
+from core.user_scope import user_storage_key
 
 logger = configure_logging()
+
+DATA_FOLDER = "data"
+SUPPORTED_EXTENSIONS = {".csv", ".pdf", ".xlsx", ".xls", ".docx"}
+
+
+def _username_from_config(config: RunnableConfig | None) -> str:
+    if not config:
+        return "admin"
+    return str(config.get("configurable", {}).get("username", "admin"))
+
+
+def _user_folder(username: str) -> str:
+    return os.path.join(DATA_FOLDER, user_storage_key(username))
+
 
 def load_dataframes(folder="data"):
     dataframes = {}
@@ -21,7 +37,7 @@ def load_dataframes(folder="data"):
 dataframes = load_dataframes()
 
 @tool
-def exact_lookup(file_name: str, column: str, value: str) -> str:
+def exact_lookup(file_name: str, column: str, value: str, config: RunnableConfig) -> str:
     """
     Perform an exact lookup in a CSV file by matching a column to a value.
     Use this for specific ID lookups, account numbers, card numbers, client IDs etc.
@@ -36,11 +52,14 @@ def exact_lookup(file_name: str, column: str, value: str) -> str:
     - If file is NOT tabular, use search_financial_docs instead.
     - EXCEPT TABULAR FILES, DONT SEARCH FOR VALUES AND COLUMNS.
     """
-    if file_name not in dataframes:
-        available = ", ".join(dataframes.keys())
+    username = _username_from_config(config)
+    user_dataframes = load_dataframes(_user_folder(username))
+
+    if file_name not in user_dataframes:
+        available = ", ".join(user_dataframes.keys())
         return f"File '{file_name}' not found. Available files: {available}"
 
-    df = dataframes[file_name]
+    df = user_dataframes[file_name]
     col = column.strip().lower()
 
     if col not in df.columns:
@@ -57,19 +76,23 @@ def exact_lookup(file_name: str, column: str, value: str) -> str:
 
 
 @tool  
-def list_available_files() -> str:
+def list_available_files(config: RunnableConfig) -> str:
     """List all available files in the data folder including CSVs, PDFs, Excel and Word docs.
     IMPORTANT: Call this tool ONLY ONCE per conversation. After receiving the file list,
     use the information to answer the user's question directly. Do NOT call this tool again.
     """
-    DATA_FOLDER = "data"
-    SUPPORTED = {".csv", ".pdf", ".xlsx", ".xls", ".docx"}
+    username = _username_from_config(config)
+    user_folder = _user_folder(username)
     result = []
 
-    all_files = [
-        f for f in os.listdir(DATA_FOLDER)
-        if os.path.splitext(f)[1].lower() in SUPPORTED
-    ]
+    if not os.path.isdir(user_folder):
+        return "No files found in data folder."
+
+    user_dataframes = load_dataframes(user_folder)
+    all_files = sorted(
+        f for f in os.listdir(user_folder)
+        if os.path.splitext(f)[1].lower() in SUPPORTED_EXTENSIONS
+    )
 
     if not all_files:
         return "No files found in data folder."
@@ -77,8 +100,8 @@ def list_available_files() -> str:
     for filename in all_files:
         ext = os.path.splitext(filename)[1].lower()
         if ext == ".csv":
-            if filename in dataframes:
-                cols = ", ".join(dataframes[filename].columns.tolist())
+            if filename in user_dataframes:
+                cols = ", ".join(user_dataframes[filename].columns.tolist())
                 result.append(f"CSV: {filename} — columns: {cols}")
             else:
                 result.append(f"CSV: {filename} — (not loaded)")

@@ -121,7 +121,8 @@ SQL_KEYWORDS = frozenset([
 FINANCE_KEYWORDS = frozenset([
     "stock", "stocks", "price", "market", "ticker", "earnings", "revenue", "profit",
     "analyst", "rating", "quote", "dividend", "ratio", "balance", "cash flow",
-    "aapl", "tsla", "msft", "googl", "amzn", "meta", "nvda", "financial"
+    "aapl", "tsla", "msft", "googl", "goog", "google", "alphabet", "amzn", "meta",
+    "nvda", "financial", "history"
 ])
 
 WEB_KEYWORDS = frozenset([
@@ -143,9 +144,15 @@ FINANCE_PRIORITY_PATTERNS = (
     r"\bshares\b",
     r"\bmarket cap\b",
     r"\bquote\b",
+    r"\bearnings\b",
+    r"\bcompare\b",
     r"\bgoogl\b",
     r"\bgoog\b",
+    r"\bgoogle\b",
+    r"\bgoogle['’]?s\b",
+    r"\balphabet\b",
     r"\bgoogle stock\b",
+    r"\bgoogle['’]?s stock\b",
     r"\bgoogle stocks\b",
     r"\balphabet stock\b",
     r"\baapl\b",
@@ -173,6 +180,37 @@ def route_with_rules(query: str) -> str | None:
     Hard rules for high-signal intents that should not be left to embeddings.
     """
     query_lower = query.lower()
+
+    has_market_subject = any(
+        re.search(pattern, query_lower)
+        for pattern in (
+            r"\bstock(s)?\b",
+            r"\bshare(s)?\b",
+            r"\bticker\b",
+            r"\bgoogl\b",
+            r"\bgoog\b",
+            r"\bgoogle['’]?s?\b",
+            r"\balphabet\b",
+            r"\baapl\b",
+            r"\bmsft\b",
+            r"\btsla\b",
+            r"\bnvda\b",
+        )
+    )
+    has_market_action = any(
+        re.search(pattern, query_lower)
+        for pattern in (
+            r"\bprice\b",
+            r"\btrend\b",
+            r"\bhistory\b",
+            r"\bchart\b",
+            r"\bgraph\b",
+            r"\bplot\b",
+            r"\bvisuali[sz]e\b",
+        )
+    )
+    if has_market_subject and has_market_action:
+        return RouteTarget.FINANCE.value
 
     if any(re.search(pattern, query_lower) for pattern in FINANCE_PRIORITY_PATTERNS):
         return RouteTarget.FINANCE.value

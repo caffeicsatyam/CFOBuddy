@@ -1,11 +1,7 @@
 import asyncio
-import base64
-import hashlib
-import hmac
 import json
 import os
 import secrets
-import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Optional
@@ -17,6 +13,7 @@ from fastapi import (
     Depends,
     FastAPI,
     File,
+    Form,
     HTTPException,
     Security,
     UploadFile,
@@ -26,12 +23,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse as FastAPIFileResponse
 from fastapi.responses import StreamingResponse
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import AIMessage, HumanMessage
 from pydantic import BaseModel
 
 from build_index import build_index
 from cfobuddy_logging import configure_logging
 from load_data import load_csvs_to_neon
+from core.user_scope import user_storage_key
 
 load_dotenv()
 
@@ -87,56 +85,11 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/login", auto_error=False)
 DATA_FOLDER = Path("data")
 CHARTS_FOLDER = Path("static/charts")
 ALLOWED_EXTENSIONS = {"csv", "pdf", "xlsx", "xls", "docx"}
+MAX_UPLOAD_BYTES = int(os.getenv("CFO_BUDDY_MAX_UPLOAD_BYTES", str(20 * 1024 * 1024)))
 
-# Auth Helpers
-def _b64url_encode(data: bytes) -> str:
-    return base64.urlsafe_b64encode(data).decode("utf-8").rstrip("=")
-
-def _b64url_decode(data: str) -> bytes:
-    padding = "=" * (-len(data) % 4)
-    return base64.urlsafe_b64decode(data + padding)
-
-def _sign(message: bytes) -> str:
-    digest = hmac.new(JWT_SECRET.encode("utf-8"), message, hashlib.sha256).digest()
-    return _b64url_encode(digest)
-
-def create_access_token(subject: str) -> str:
-    now = int(time.time())
-    header = {"alg": "HS256", "typ": "JWT"}
-    payload = {
-        "sub": subject,
-        "iat": now,
-        "exp": now + JWT_EXPIRES_IN_SECONDS,
-    }
-    header_segment = _b64url_encode(json.dumps(header, separators=(",", ":"), sort_keys=True).encode("utf-8"))
-    payload_segment = _b64url_encode(json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8"))
-    signing_input = f"{header_segment}.{payload_segment}".encode("utf-8")
-    return f"{header_segment}.{payload_segment}.{_sign(signing_input)}"
-
-def decode_access_token(token: str) -> dict[str, Any]:
-    try:
-        header_segment, payload_segment, signature = token.split(".")
-    except ValueError as exc:
-        raise HTTPException(status_code=401, detail="Invalid token format") from exc
-
-    signing_input = f"{header_segment}.{payload_segment}".encode("utf-8")
-    expected_signature = _sign(signing_input)
-    if not hmac.compare_digest(signature, expected_signature):
-        raise HTTPException(status_code=401, detail="Invalid token signature")
-
-    try:
-        payload = json.loads(_b64url_decode(payload_segment))
-    except (json.JSONDecodeError, ValueError) as exc:
-        raise HTTPException(status_code=401, detail="Invalid token payload") from exc
-
-    exp = int(payload.get("exp", 0))
-    if exp <= int(time.time()):
-        raise HTTPException(status_code=401, detail="Token has expired")
-
-    return payload
-
-def verify_user(username: str, password: str) -> bool:
-    return secrets.compare_digest(username, AUTH_USERNAME) and secrets.compare_digest(password, AUTH_PASSWORD)
+from core.auth import create_access_token, decode_access_token, get_password_hash, verify_password, LEGACY_API_KEY
+from core.database import connect_to_mongo, close_mongo_connection, get_db
+from models.user import UserCreate, UserInDB, UserResponse as UserResponseModel
 
 def verify_legacy_api_key_login(username: str, password: str) -> bool:
     return (
@@ -191,6 +144,7 @@ class FileResponse(BaseModel):
 class UploadResponse(BaseModel):
     message: str
     filename: str
+    thread_id: Optional[str] = None
 
 class TokenResponse(BaseModel):
     access_token: str
@@ -204,12 +158,12 @@ class UserResponse(BaseModel):
 # Status tracking
 indexing_status = {"status": "ready", "message": "Idle"}
 
-def build_index_with_status(file_path: str | None = None) -> None:
+def build_index_with_status(file_path: str | None = None, username: str | None = None) -> None:
     global indexing_status
     target = Path(file_path).name if file_path else "documents"
     indexing_status = {"status": "indexing", "message": f"Indexing {target}"}
     try:
-        indexed_count = build_index([file_path] if file_path else None)
+        indexed_count = build_index([file_path] if file_path else None, username=username)
         try:
             from tools.search import reload_index
 
@@ -226,10 +180,43 @@ def build_index_with_status(file_path: str | None = None) -> None:
         logger.exception("Index build failed")
         indexing_status = {"status": "error", "message": str(exc)}
 
+
+def remember_upload_in_thread(thread_id: str | None, filename: str, username: str) -> None:
+    """Persist upload context so follow-up chat turns can refer to the file."""
+    if not thread_id:
+        return
+
+    try:
+        from core.graph import CFOBuddy
+
+        config = {"configurable": {"thread_id": thread_id, "username": username}}
+        CFOBuddy.update_state(
+            config,
+            {
+                "messages": [
+                    HumanMessage(content=f"Uploaded file: {filename}"),
+                    AIMessage(
+                        content=(
+                            f"File '{filename}' was uploaded and is available for analysis. "
+                            "Use list_available_files, list_tables, sql_query, or "
+                            "search_financial_docs as appropriate for follow-up questions."
+                        )
+                    ),
+                ]
+            },
+        )
+    except Exception:
+        logger.warning("Failed to persist upload context for thread %s", thread_id, exc_info=True)
+
 @app.on_event("startup")
 async def ensure_initial_csv_load() -> None:
+    await connect_to_mongo()
     # Don't block startup — load CSVs in background so the server can accept requests immediately
     asyncio.create_task(asyncio.to_thread(load_csvs_to_neon))
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    await close_mongo_connection()
 
 # Routes
 @app.get("/", tags=["Health"])
@@ -240,12 +227,31 @@ async def root() -> dict[str, str]:
 async def health() -> dict[str, str]:
     return {"status": "ok"}
 
+@app.post("/auth/register", response_model=UserResponseModel, tags=["Auth"])
+async def register(user_in: UserCreate):
+    db = get_db()
+    existing_user = await db.users.find_one({"username": user_in.username})
+    if existing_user:
+        raise HTTPException(status_code=400, detail="Username already registered")
+    
+    hashed_password = get_password_hash(user_in.password)
+    user_dict = user_in.model_dump()
+    del user_dict["password"]
+    db_user = UserInDB(**user_dict, hashed_password=hashed_password)
+    
+    await db.users.insert_one(db_user.model_dump())
+    
+    return UserResponseModel(**db_user.model_dump(), auth_type="jwt")
+
 @app.post("/auth/login", response_model=TokenResponse, tags=["Auth"])
 async def login(form_data: OAuth2PasswordRequestForm = Depends()) -> TokenResponse:
     if verify_legacy_api_key_login(form_data.username, form_data.password):
         return TokenResponse(access_token=LEGACY_API_KEY, username="legacy-api-key")
 
-    if not verify_user(form_data.username, form_data.password):
+    db = get_db()
+    user = await db.users.find_one({"username": form_data.username})
+    
+    if not user or not verify_password(form_data.password, user["hashed_password"]):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect username or password",
@@ -254,12 +260,20 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends()) -> TokenRespon
     token = create_access_token(form_data.username)
     return TokenResponse(access_token=token, username=form_data.username)
 
-@app.get("/auth/me", response_model=UserResponse, tags=["Auth"])
-async def read_current_user(payload: dict[str, Any] = Depends(require_auth)) -> UserResponse:
-    return UserResponse(
-        username=str(payload.get("sub", AUTH_USERNAME)),
-        auth_type=str(payload.get("auth_type", "jwt")),
-    )
+@app.get("/auth/me", response_model=UserResponseModel, tags=["Auth"])
+async def read_current_user(payload: dict[str, Any] = Depends(require_auth)) -> UserResponseModel:
+    username = str(payload.get("sub", AUTH_USERNAME))
+    auth_type = str(payload.get("auth_type", "jwt"))
+    
+    if auth_type == "api_key" or username == "legacy-api-key":
+        return UserResponseModel(username=username, auth_type=auth_type, created_at=datetime.utcnow(), company="Admin", full_name="Admin")
+        
+    db = get_db()
+    user = await db.users.find_one({"username": username})
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+        
+    return UserResponseModel(**user, auth_type=auth_type)
 
 def parse_chart_payload(content: str) -> Optional[dict[str, Any]]:
     for marker in ("CHART_JSON:", "CHART_DATA:"):
@@ -327,12 +341,26 @@ def sse_event(event: str, payload: dict[str, Any]) -> str:
 router = APIRouter(dependencies=[Depends(require_auth)])
 
 @router.get("/threads", response_model=ThreadResponse)
-async def get_threads() -> ThreadResponse:
+async def get_threads(payload: dict[str, Any] = Depends(require_auth)) -> ThreadResponse:
     from core.memory import retrieve_threads_with_preview
+    username = payload.get("sub", AUTH_USERNAME)
+    auth_type = payload.get("auth_type", "jwt")
+    db = get_db()
+    
     try:
-        threads = retrieve_threads_with_preview()
+        all_threads = retrieve_threads_with_preview()
+        if auth_type == "api_key" or username == "legacy-api-key":
+            threads = all_threads
+        else:
+            user = await db.users.find_one({"username": username})
+            user_threads = user.get("threads", []) if user else []
+            threads = [t for t in all_threads if t["id"] in user_threads]
+            
         if not threads:
             threads = [{"id": "main", "name": "Main Analysis"}]
+            if auth_type != "api_key" and username != "legacy-api-key":
+                await db.users.update_one({"username": username}, {"$addToSet": {"threads": "main"}})
+                
         return ThreadResponse(threads=[ThreadInfo(**t) for t in threads])
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
@@ -346,9 +374,16 @@ async def remove_thread(thread_id: str) -> dict[str, str]:
     return {"status": "deleted", "thread_id": thread_id}
 
 @router.post("/chat", response_model=ChatResponse)
-async def chat(request: ChatRequest) -> ChatResponse:
+async def chat(request: ChatRequest, payload: dict[str, Any] = Depends(require_auth)) -> ChatResponse:
+    username = payload.get("sub", AUTH_USERNAME)
+    auth_type = payload.get("auth_type", "jwt")
+    
+    if auth_type != "api_key" and username != "legacy-api-key":
+        db = get_db()
+        await db.users.update_one({"username": username}, {"$addToSet": {"threads": request.thread_id}})
+
     from core.graph import CFOBuddy
-    config = {"configurable": {"thread_id": request.thread_id}}
+    config = {"configurable": {"thread_id": request.thread_id, "username": username}}
     try:
         response = await asyncio.to_thread(
             CFOBuddy.invoke,
@@ -362,10 +397,17 @@ async def chat(request: ChatRequest) -> ChatResponse:
         raise HTTPException(status_code=500, detail=str(exc))
 
 @router.post("/chat/stream")
-async def chat_stream(request: ChatRequest) -> StreamingResponse:
+async def chat_stream(request: ChatRequest, payload: dict[str, Any] = Depends(require_auth)) -> StreamingResponse:
+    username = payload.get("sub", AUTH_USERNAME)
+    auth_type = payload.get("auth_type", "jwt")
+    
+    if auth_type != "api_key" and username != "legacy-api-key":
+        db = get_db()
+        await db.users.update_one({"username": username}, {"$addToSet": {"threads": request.thread_id}})
+
     from core.graph import CFOBuddy
 
-    config = {"configurable": {"thread_id": request.thread_id}}
+    config = {"configurable": {"thread_id": request.thread_id, "username": username}}
 
     async def event_stream():
         queue: asyncio.Queue[Any] = asyncio.Queue()
@@ -423,26 +465,53 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
     )
 
 @router.get("/files", response_model=FileResponse)
-async def list_files() -> FileResponse:
-    if not DATA_FOLDER.exists():
+async def list_files(payload: dict[str, Any] = Depends(require_auth)) -> FileResponse:
+    username = payload.get("sub", AUTH_USERNAME)
+    user_folder = DATA_FOLDER / user_storage_key(username)
+    
+    if not user_folder.exists():
         return FileResponse(files=[])
     files = []
-    for path in DATA_FOLDER.iterdir():
+    for path in user_folder.iterdir():
         if path.is_file() and path.suffix.lower().lstrip(".") in ALLOWED_EXTENSIONS:
             files.append(FileInfo(name=path.name, type=path.suffix.lstrip(".").upper(), size=f"{path.stat().st_size / 1024:.1f} KB"))
     return FileResponse(files=files)
 
 @router.post("/upload", response_model=UploadResponse)
-async def upload_file(file: UploadFile = File(...), background_tasks: BackgroundTasks = None) -> UploadResponse:
+async def upload_file(
+    file: UploadFile = File(...), 
+    thread_id: Optional[str] = Form(None),
+    payload: dict[str, Any] = Depends(require_auth),
+    background_tasks: BackgroundTasks = None
+) -> UploadResponse:
     if not file.filename: raise HTTPException(status_code=400, detail="No file selected")
-    DATA_FOLDER.mkdir(parents=True, exist_ok=True)
-    filepath = DATA_FOLDER / Path(file.filename).name
+    username = payload.get("sub", AUTH_USERNAME)
+    filename = Path(file.filename).name
+    extension = Path(filename).suffix.lower().lstrip(".")
+    if extension not in ALLOWED_EXTENSIONS:
+        allowed = ", ".join(sorted(ALLOWED_EXTENSIONS))
+        raise HTTPException(status_code=400, detail=f"Unsupported file type. Allowed: {allowed}")
+
+    user_folder = DATA_FOLDER / user_storage_key(username)
+    user_folder.mkdir(parents=True, exist_ok=True)
+    
+    filepath = user_folder / filename
     content = await file.read()
+    if len(content) > MAX_UPLOAD_BYTES:
+        max_mb = MAX_UPLOAD_BYTES / (1024 * 1024)
+        raise HTTPException(status_code=413, detail=f"File is too large. Maximum size is {max_mb:.0f} MB.")
+    auth_type = payload.get("auth_type", "jwt")
+    if thread_id and auth_type != "api_key" and username != "legacy-api-key":
+        db = get_db()
+        await db.users.update_one({"username": username}, {"$addToSet": {"threads": thread_id}})
     filepath.write_bytes(content)
+    remember_upload_in_thread(thread_id, filename, username)
+    
     if background_tasks is None: background_tasks = BackgroundTasks()
-    if filepath.suffix.lower() == ".csv": background_tasks.add_task(load_csvs_to_neon, [str(filepath)], True)
-    background_tasks.add_task(build_index_with_status, str(filepath))
-    return UploadResponse(message=f"'{file.filename}' uploaded successfully", filename=file.filename)
+    if filepath.suffix.lower() == ".csv": 
+        background_tasks.add_task(load_csvs_to_neon, [str(filepath)], True, username)
+    background_tasks.add_task(build_index_with_status, str(filepath), username)
+    return UploadResponse(message=f"'{filename}' uploaded successfully", filename=filename, thread_id=thread_id)
 
 @router.get("/threads/{thread_id}/history", response_model=ThreadHistoryResponse)
 async def get_history(thread_id: str) -> ThreadHistoryResponse:

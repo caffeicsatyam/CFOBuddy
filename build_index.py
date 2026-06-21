@@ -12,6 +12,7 @@ from llama_index.readers.file import DocxReader, PandasCSVReader, PandasExcelRea
 from llama_index.vector_stores.postgres import PGVectorStore
 
 from cfobuddy_logging import configure_logging
+from core.user_scope import user_storage_key
 
 load_dotenv()
 logger = configure_logging()
@@ -86,9 +87,9 @@ def _file_hash(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _candidate_files(input_files: Iterable[str | Path] | None) -> list[Path]:
+def _candidate_files(input_files: Iterable[str | Path] | None, username: str = "admin") -> list[Path]:
     if input_files is None:
-        root = Path(DATA_FOLDER)
+        root = Path(DATA_FOLDER) / user_storage_key(username)
         if not root.exists():
             return []
         files = [path for path in root.rglob("*") if path.is_file()]
@@ -125,6 +126,7 @@ def _delete_previous_vectors(
 def build_index(
     input_files: Iterable[str | Path] | None = None,
     force: bool = False,
+    username: str = "admin",
 ) -> int:
     """Build and store hybrid vectors in Neon DB.
 
@@ -154,7 +156,7 @@ def build_index(
 
     storage_context = StorageContext.from_defaults(vector_store=vector_store)
     manifest = _load_manifest()
-    candidates = _candidate_files(input_files)
+    candidates = _candidate_files(input_files, username)
 
     if not candidates:
         logger.info("No supported documents found for indexing.")
@@ -195,6 +197,7 @@ def build_index(
     for doc in documents:
         indexed_at = datetime.datetime.now().isoformat()
         doc.metadata["indexed_at"] = indexed_at
+        doc.metadata["username"] = username
         file_path = doc.metadata.get("file_path")
         if file_path:
             resolved_file_path = str(Path(str(file_path)).resolve())
@@ -224,4 +227,4 @@ def build_index(
 
 
 if __name__ == "__main__":
-    build_index()
+    build_index(username="admin")

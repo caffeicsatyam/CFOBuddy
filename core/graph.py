@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel
 from langchain_core.messages import AIMessage, SystemMessage, HumanMessage
+from langchain_core.runnables import RunnableConfig
 from langgraph.graph import StateGraph, START, END
 from langgraph.prebuilt import tools_condition
 from langsmith import traceable
@@ -9,6 +10,7 @@ from langsmith import traceable
 from core.schemas import RouteTarget, State
 from core.memory import checkpointer
 from core.llm import llm
+from load_data import user_table_prefix
 from tools import (
     basic_tools,
     finance_tools,
@@ -145,6 +147,7 @@ class PromptConfig(BaseModel):
 
     Always:
     - Call get_financial_data first, then summarize the output
+    - For stock price trend charts, call get_financial_data with data_type="history", then call prepare_chart_data using x_column="datetime" and y_column="close", then call generate_chart as a line chart
     - Present numbers with units (B for billions, M for millions)
     - Highlight key insights after presenting data
     - Compare periods when multiple results are returned
@@ -257,11 +260,109 @@ def model_node(state: State) -> dict:
     return {"messages": [response]}
 
 
+def _normalize_identifier(value: str) -> str:
+    import re
+
+    return re.sub(r"[^a-z0-9]+", "", value.lower()).removesuffix("s")
+
+
+def _column_mentioned(query: str, column: str) -> bool:
+    import re
+
+    query_lower = query.lower()
+    column_words = [word for word in re.split(r"[^a-z0-9]+", column.lower()) if word]
+    if not column_words:
+        return False
+
+    singular_words = [word.removesuffix("s") for word in column_words]
+    normalized_query = _normalize_identifier(query_lower)
+    normalized_column = _normalize_identifier(column)
+    if normalized_column and normalized_column in normalized_query:
+        return True
+
+    return all(
+        re.search(rf"\b{re.escape(word)}s?\b", query_lower)
+        for word in singular_words
+    )
+
+
+def _try_direct_average_query(state: State, config: RunnableConfig) -> AIMessage | None:
+    """Handle simple AVG(metric) GROUP BY dimension queries without LLM tool calling."""
+    import re
+
+    last_message = state["messages"][-1]
+    content = str(getattr(last_message, "content", "") or "")
+    query_lower = content.lower()
+    if not re.search(r"\b(avg|average|mean)\b", query_lower):
+        return None
+    if not re.search(r"\b(per|by|grouped by|for each)\b", query_lower):
+        return None
+
+    username = str(config.get("configurable", {}).get("username", "admin"))
+    try:
+        from tools.sql import get_available_tables, sql_query
+    except Exception:
+        return None
+
+    tables = get_available_tables(username)
+    if not tables:
+        return None
+
+    for table_name, columns in tables.items():
+        mentioned = [column for column in columns if _column_mentioned(query_lower, column)]
+        if len(mentioned) < 2:
+            continue
+
+        group_column = next((column for column in mentioned if re.search(rf"\b{re.escape(column.lower())}\b", query_lower)), mentioned[0])
+        metric_candidates = [column for column in mentioned if column != group_column]
+        metric_column = metric_candidates[-1] if metric_candidates else None
+        if not metric_column:
+            continue
+
+        if "gender" in query_lower and "gender" in columns:
+            group_column = "gender"
+            if metric_column == group_column:
+                metric_column = next((column for column in mentioned if column != group_column), None)
+        if not metric_column:
+            continue
+
+        safe_prefix = user_table_prefix(username)
+        if not table_name.startswith(f"{safe_prefix}_"):
+            continue
+
+        sql = (
+            f'SELECT "{group_column}", AVG("{metric_column}") AS "average_{metric_column}" '
+            f'FROM "{table_name}" '
+            f'GROUP BY "{group_column}" '
+            f'ORDER BY "{group_column}"'
+        )
+        result = sql_query.invoke({"sql": sql}, config=config)
+        return AIMessage(content=result)
+
+    return None
+
+
 @traceable(run_type="chain")
-def sql_node(state: State) -> dict:
+def sql_node(state: State, config: RunnableConfig) -> dict:
     """SQL expert node — handles all database queries."""
+    direct_response = _try_direct_average_query(state, config)
+    if direct_response is not None:
+        return {"messages": [direct_response]}
+
     messages = [SystemMessage(content=_prompts.sql_expert)] + list(state["messages"])
-    response = llm_sql.invoke(messages)
+    try:
+        response = llm_sql.invoke(messages)
+    except Exception as exc:
+        return {
+            "messages": [
+                AIMessage(
+                    content=(
+                        "I could not prepare the database query for that request. "
+                        "Try phrasing it with the exact column names, or ask me to list tables first."
+                    )
+                )
+            ]
+        }
     return {"messages": [response]}
 
 
@@ -288,6 +389,35 @@ def web_search_node(state: State) -> dict:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# LOOP BREAKER — prevents infinite tool-call cycles
+# ══════════════════════════════════════════════════════════════════════════════
+
+MAX_TOOL_CALLS = 3  # Per expert node, per invocation
+
+
+def _make_counting_tool_node(base_tool_node):
+    """Wrap a ToolNode so it increments tool_call_count in state."""
+    def counting_node(state: State) -> dict:
+        result = base_tool_node.invoke(state)
+        new_count = state.get("tool_call_count", 0) + 1
+        if isinstance(result, dict):
+            result["tool_call_count"] = new_count
+        else:
+            result = {"tool_call_count": new_count}
+        return result
+    return counting_node
+
+
+def _make_loop_or_end(agent_node_name: str):
+    """Return a condition function: continue looping or force END."""
+    def should_continue(state: State) -> str:
+        if state.get("tool_call_count", 0) >= MAX_TOOL_CALLS:
+            return END
+        return tools_condition(state)
+    return should_continue
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # BUILD GRAPH
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -300,10 +430,10 @@ graph_builder.add_node("sql_node",         sql_node)
 graph_builder.add_node("finance_node",     finance_node)
 graph_builder.add_node("web_search_node",  web_search_node)
 
-graph_builder.add_node("internal_tools",   internal_tool_node)
-graph_builder.add_node("sql_tools",        sql_tool_node)
-graph_builder.add_node("finance_tools",    finance_tool_node)
-graph_builder.add_node("web_search_tools", web_search_tool_node)
+graph_builder.add_node("internal_tools",   _make_counting_tool_node(internal_tool_node))
+graph_builder.add_node("sql_tools",        _make_counting_tool_node(sql_tool_node))
+graph_builder.add_node("finance_tools",    _make_counting_tool_node(finance_tool_node))
+graph_builder.add_node("web_search_tools", _make_counting_tool_node(web_search_tool_node))
 
 # ── entry ──────────────────────────────────────────────────────────────────
 graph_builder.add_edge(START, "upload_node")
@@ -320,7 +450,7 @@ graph_builder.add_conditional_edges(
     },
 )
 
-# ── node → tool → node loops ───────────────────────────────────────────────
+# ── node → tool → node loops (with loop-breaker) ──────────────────────────
 for node, tool_node in [
     ("model",          "internal_tools"),
     ("sql_node",       "sql_tools"),
@@ -329,7 +459,7 @@ for node, tool_node in [
 ]:
     graph_builder.add_conditional_edges(
         node,
-        tools_condition,
+        _make_loop_or_end(node),
         {"tools": tool_node, END: END},
     )
     graph_builder.add_edge(tool_node, node)

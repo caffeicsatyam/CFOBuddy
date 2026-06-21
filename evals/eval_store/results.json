@@ -1,0 +1,412 @@
+{
+  "metadata": {
+    "model": "llama-3.1-8b-instant",
+    "provider": "groq",
+    "timestamp": "2026-06-14 02:37:03",
+    "n_questions": 15,
+    "skip_invoke": false
+  },
+  "overall": {
+    "routing_accuracy": 0.9333,
+    "completion_rate": 0.9333,
+    "tool_precision": 0.6,
+    "tool_recall": 0.8,
+    "tool_f1": 0.6857,
+    "avg_faithfulness": 0.486,
+    "avg_answer_relevancy": 0.4147,
+    "avg_context_precision": 0.7111,
+    "avg_context_recall": 0.8333,
+    "avg_latency_s": 61.96,
+    "min_latency_s": 4.67,
+    "max_latency_s": 131.32,
+    "total_time_s": 966.75
+  },
+  "per_agent": {
+    "finance_node": {
+      "total_queries": 4,
+      "routing_accuracy": 0.75,
+      "completion_rate": 1.0,
+      "tool_precision": 0.6,
+      "tool_recall": 0.75,
+      "tool_f1": 0.6667,
+      "avg_latency": 61.49,
+      "min_latency": 26.31,
+      "max_latency": 96.59,
+      "avg_faithfulness": 0.7225,
+      "avg_relevancy": 0.6425,
+      "avg_context_precision": 0.75,
+      "avg_context_recall": 0.75
+    },
+    "sql_node": {
+      "total_queries": 5,
+      "routing_accuracy": 1.0,
+      "completion_rate": 1.0,
+      "tool_precision": 0.5556,
+      "tool_recall": 0.8333,
+      "tool_f1": 0.6667,
+      "avg_latency": 69.84,
+      "min_latency": 19.88,
+      "max_latency": 97.03,
+      "avg_faithfulness": 0.35,
+      "avg_relevancy": 0.22,
+      "avg_context_precision": 0.6667,
+      "avg_context_recall": 0.9
+    },
+    "web_search_node": {
+      "total_queries": 2,
+      "routing_accuracy": 1.0,
+      "completion_rate": 1.0,
+      "tool_precision": 1.0,
+      "tool_recall": 1.0,
+      "tool_f1": 1.0,
+      "avg_latency": 9.8,
+      "min_latency": 4.67,
+      "max_latency": 14.94,
+      "avg_faithfulness": 0.9,
+      "avg_relevancy": 0.7,
+      "avg_context_precision": 1.0,
+      "avg_context_recall": 1.0
+    },
+    "model": {
+      "total_queries": 4,
+      "routing_accuracy": 1.0,
+      "completion_rate": 0.75,
+      "tool_precision": 0.5,
+      "tool_recall": 0.6667,
+      "tool_f1": 0.5714,
+      "avg_latency": 78.65,
+      "min_latency": 29.64,
+      "max_latency": 131.32,
+      "avg_faithfulness": 0.2125,
+      "avg_relevancy": 0.2875,
+      "avg_context_precision": 0.5833,
+      "avg_context_recall": 0.75
+    }
+  },
+  "per_question": [
+    {
+      "id": "Q01",
+      "type": "factual",
+      "query": "What is the current stock price of Apple?",
+      "expected_route": "finance_node",
+      "actual_route": "finance_node",
+      "routing_correct": true,
+      "expected_tools": [
+        "get_financial_data"
+      ],
+      "called_tools": [
+        "get_financial_data"
+      ],
+      "completed": true,
+      "latency_s": 26.31,
+      "faithfulness": 0.95,
+      "answer_relevancy": 0.95,
+      "context_precision": 1.0,
+      "context_recall": 1.0,
+      "answer_preview": "The current stock price of Apple is $291.13. The stock has seen a decline of 4.5% in the last trading session, with an open price of $296.08, a high of $297.14, and a low of $289.62. The volume of sha"
+    },
+    {
+      "id": "Q02",
+      "type": "factual",
+      "query": "What is Tesla's current market cap and PE ratio?",
+      "expected_route": "finance_node",
+      "actual_route": "finance_node",
+      "routing_correct": true,
+      "expected_tools": [
+        "get_financial_data"
+      ],
+      "called_tools": [
+        "get_financial_data"
+      ],
+      "completed": true,
+      "latency_s": 47.78,
+      "faithfulness": 0.99,
+      "answer_relevancy": 0.95,
+      "context_precision": 1.0,
+      "context_recall": 1.0,
+      "answer_preview": "Tesla's current market cap is $1526.44B and its PE ratio is 369.4818."
+    },
+    {
+      "id": "Q03",
+      "type": "relational",
+      "query": "Compare the earnings of Microsoft and Google over the last year.",
+      "expected_route": "finance_node",
+      "actual_route": "sql_node",
+      "routing_correct": false,
+      "expected_tools": [
+        "get_financial_data"
+      ],
+      "called_tools": [
+        "sql_query",
+        "list_tables",
+        "sql_query",
+        "list_tables"
+      ],
+      "completed": true,
+      "latency_s": 96.59,
+      "faithfulness": 0.0,
+      "answer_relevancy": 0.0,
+      "context_precision": 0.0,
+      "context_recall": 0.0,
+      "answer_preview": ""
+    },
+    {
+      "id": "Q04",
+      "type": "analytical",
+      "query": "What is the average revenue per customer grouped by region in our sales data?",
+      "expected_route": "sql_node",
+      "actual_route": "sql_node",
+      "routing_correct": true,
+      "expected_tools": [
+        "sql_query"
+      ],
+      "called_tools": [
+        "sql_query",
+        "list_tables",
+        "sql_query",
+        "list_tables"
+      ],
+      "completed": true,
+      "latency_s": 81.35,
+      "faithfulness": 0.0,
+      "answer_relevancy": 0.0,
+      "context_precision": 0.5,
+      "context_recall": 1.0,
+      "answer_preview": ""
+    },
+    {
+      "id": "Q05",
+      "type": "analytical",
+      "query": "Calculate the correlation between marketing spend and total sales.",
+      "expected_route": "sql_node",
+      "actual_route": "sql_node",
+      "routing_correct": true,
+      "expected_tools": [
+        "sql_query"
+      ],
+      "called_tools": [
+        "sql_query",
+        "sql_query",
+        "list_tables",
+        "get_sql_examples"
+      ],
+      "completed": true,
+      "latency_s": 97.03,
+      "faithfulness": 0.0,
+      "answer_relevancy": 0.0,
+      "context_precision": 0.3333,
+      "context_recall": 1.0,
+      "answer_preview": ""
+    },
+    {
+      "id": "Q06",
+      "type": "analytical",
+      "query": "Show me the top 5 months by total sales from our financial data.",
+      "expected_route": "sql_node",
+      "actual_route": "sql_node",
+      "routing_correct": true,
+      "expected_tools": [
+        "sql_query"
+      ],
+      "called_tools": [
+        "sql_query"
+      ],
+      "completed": true,
+      "latency_s": 60.4,
+      "faithfulness": 0.0,
+      "answer_relevancy": 0.0,
+      "context_precision": 1.0,
+      "context_recall": 1.0,
+      "answer_preview": "Would you like to generate a chart for this data?"
+    },
+    {
+      "id": "Q07",
+      "type": "thematic",
+      "query": "What are the latest news about Federal Reserve interest rate decisions?",
+      "expected_route": "web_search_node",
+      "actual_route": "web_search_node",
+      "routing_correct": true,
+      "expected_tools": [
+        "web_search"
+      ],
+      "called_tools": [
+        "web_search"
+      ],
+      "completed": true,
+      "latency_s": 4.67,
+      "faithfulness": 0.95,
+      "answer_relevancy": 0.95,
+      "context_precision": 1.0,
+      "context_recall": 1.0,
+      "answer_preview": "The latest news about Federal Reserve interest rate decisions is that the Committee decided to maintain the target range for the federal funds rate at 3-1/2 to 3-3/4 percent. This decision was made in"
+    },
+    {
+      "id": "Q08",
+      "type": "factual",
+      "query": "Who won the recent presidential election?",
+      "expected_route": "web_search_node",
+      "actual_route": "web_search_node",
+      "routing_correct": true,
+      "expected_tools": [
+        "web_search"
+      ],
+      "called_tools": [
+        "web_search"
+      ],
+      "completed": true,
+      "latency_s": 14.94,
+      "faithfulness": 0.85,
+      "answer_relevancy": 0.45,
+      "context_precision": 1.0,
+      "context_recall": 1.0,
+      "answer_preview": "The recent presidential election winner is Donald Trump, according to the search results. However, please note that the search results also mention other presidential election winners, including Joe B"
+    },
+    {
+      "id": "Q09",
+      "type": "retrieval",
+      "query": "According to our uploaded documents, what are the key risk factors mentioned in the annual report?",
+      "expected_route": "model",
+      "actual_route": "model",
+      "routing_correct": true,
+      "expected_tools": [
+        "search_financial_docs"
+      ],
+      "called_tools": [
+        "search_financial_docs"
+      ],
+      "completed": true,
+      "latency_s": 131.32,
+      "faithfulness": 0.85,
+      "answer_relevancy": 0.95,
+      "context_precision": 1.0,
+      "context_recall": 1.0,
+      "answer_preview": "The key risk factors mentioned in the annual report include foreign exchange risk, which arises from the majority of the company's business being transacted in foreign currency. The company has implem"
+    },
+    {
+      "id": "Q10",
+      "type": "retrieval",
+      "query": "Look up the details for customer ID 12345.",
+      "expected_route": "model",
+      "actual_route": "model",
+      "routing_correct": true,
+      "expected_tools": [
+        "exact_lookup"
+      ],
+      "called_tools": [
+        "exact_lookup",
+        "list_available_files",
+        "exact_lookup",
+        "list_tables"
+      ],
+      "completed": true,
+      "latency_s": 118.27,
+      "faithfulness": 0.0,
+      "answer_relevancy": 0.0,
+      "context_precision": 0.3333,
+      "context_recall": 1.0,
+      "answer_preview": ""
+    },
+    {
+      "id": "Q11",
+      "type": "conversational",
+      "query": "Hello there! How are you doing today?",
+      "expected_route": "model",
+      "actual_route": "model",
+      "routing_correct": true,
+      "expected_tools": [],
+      "called_tools": [],
+      "completed": true,
+      "latency_s": 29.64,
+      "faithfulness": 0.0,
+      "answer_relevancy": 0.2,
+      "context_precision": 1.0,
+      "context_recall": 1.0,
+      "answer_preview": "I'm doing great, thanks for asking. It's always a pleasure to chat with someone new. How about you? How's your day going so far?"
+    },
+    {
+      "id": "Q12",
+      "type": "retrieval",
+      "query": "What files do we have available in the system?",
+      "expected_route": "model",
+      "actual_route": "model",
+      "routing_correct": true,
+      "expected_tools": [
+        "list_available_files"
+      ],
+      "called_tools": [],
+      "completed": false,
+      "latency_s": 35.36,
+      "faithfulness": 0.0,
+      "answer_relevancy": 0.0,
+      "context_precision": 0.0,
+      "context_recall": 0.0,
+      "answer_preview": "[Error: Error code: 429 - {'error': {'message': 'Rate limit reached for model `llama-3.1-8b-instant` in organization `org_01kjqxsh72fqyb3xdrhwzs8mnn` service tier `on_demand` on tokens per minute (TPM"
+    },
+    {
+      "id": "Q13",
+      "type": "analytical",
+      "query": "What tables are available in the database and what columns do they have?",
+      "expected_route": "sql_node",
+      "actual_route": "sql_node",
+      "routing_correct": true,
+      "expected_tools": [
+        "list_tables"
+      ],
+      "called_tools": [
+        "list_tables"
+      ],
+      "completed": true,
+      "latency_s": 19.88,
+      "faithfulness": 0.95,
+      "answer_relevancy": 0.9,
+      "context_precision": 1.0,
+      "context_recall": 1.0,
+      "answer_preview": "The available tables in the database are 'body_messurement_data_set' and 'financials'. The 'body_messurement_data_set' table has 14 columns, and the 'financials' table has 17 columns."
+    },
+    {
+      "id": "Q14",
+      "type": "analytical",
+      "query": "Plot the monthly sales trend from our financial data as a chart.",
+      "expected_route": "sql_node",
+      "actual_route": "sql_node",
+      "routing_correct": true,
+      "expected_tools": [
+        "sql_query",
+        "generate_chart"
+      ],
+      "called_tools": [
+        "prepare_chart_data",
+        "generate_chart"
+      ],
+      "completed": true,
+      "latency_s": 90.53,
+      "faithfulness": 0.8,
+      "answer_relevancy": 0.2,
+      "context_precision": 0.5,
+      "context_recall": 0.5,
+      "answer_preview": "Please note that the actual chart data will be generated based on the `sql_query` result. The provided example data is just a placeholder."
+    },
+    {
+      "id": "Q15",
+      "type": "relational",
+      "query": "What is NVIDIA's analyst rating and recent stock performance?",
+      "expected_route": "finance_node",
+      "actual_route": "finance_node",
+      "routing_correct": true,
+      "expected_tools": [
+        "get_financial_data"
+      ],
+      "called_tools": [
+        "get_financial_data",
+        "get_financial_data"
+      ],
+      "completed": true,
+      "latency_s": 75.27,
+      "faithfulness": 0.95,
+      "answer_relevancy": 0.67,
+      "context_precision": 1.0,
+      "context_recall": 1.0,
+      "answer_preview": "NVIDIA's analyst rating is not available. However, the recent stock performance shows a slight increase of 0.16% with a current price of $205.19. The market capitalization is approximately $4969.91 bi"
+    }
+  ]
+}
