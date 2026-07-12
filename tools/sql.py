@@ -4,6 +4,7 @@ from dotenv import load_dotenv
 from langchain_core.tools import tool
 from langchain_core.runnables import RunnableConfig
 from sqlalchemy import text, inspect
+from core.guardrails import MAX_SQL_RESULT_ROWS, validate_sql
 from load_data import ensure_csv_tables_loaded, engine, user_table_prefix
 
 load_dotenv()
@@ -132,22 +133,30 @@ def sql_query(sql: str, config: RunnableConfig) -> str:
 
     If you are unsure what tables or columns exist, call list_tables() first.
     """
-
-    sql_clean = sql.strip().upper()
-    if not sql_clean.startswith("SELECT") and not sql_clean.startswith("WITH"):
-        return "Only SELECT queries are allowed for safety."
-
     username = config.get("configurable", {}).get("username", "admin")
 
     try:
-        # FIX: call ensure_csv_tables_loaded() once here; removed the redundant
-        # second call that was happening inside the error handler via get_available_tables().
-        ensure_csv_tables_loaded(username)
+        available_tables = get_available_tables(username)
+    except Exception as exc:
+        return f"SQL Error: could not inspect available tables: {exc}"
+
+    guardrail = validate_sql(sql, allowed_tables=set(available_tables.keys()))
+    if not guardrail.allowed:
+        return f"SQL blocked by guardrail: {guardrail.message}"
+    sql_to_execute = guardrail.content or sql.strip()
+
+    try:
         with engine.connect() as conn:
-            result = conn.execute(text(sql))
-            rows = result.fetchall()
+            result = conn.execute(text(sql_to_execute))
+            rows = result.fetchmany(MAX_SQL_RESULT_ROWS + 1)
+            truncated = len(rows) > MAX_SQL_RESULT_ROWS
+            rows = rows[:MAX_SQL_RESULT_ROWS]
             columns = list(result.keys())
-            return f"Query: {sql}\n\nResults ({len(rows)} rows):\n\n{format_results(rows, columns)}"
+            row_label = f"{len(rows)}+ rows" if truncated else f"{len(rows)} rows"
+            output = f"Query: {sql_to_execute}\n\nResults ({row_label}):\n\n{format_results(rows, columns)}"
+            if truncated:
+                output += f"\n\nResult truncated to {MAX_SQL_RESULT_ROWS} rows. Add filters or a LIMIT for more precise results."
+            return output
 
     except Exception as e:
         error_str = str(e)

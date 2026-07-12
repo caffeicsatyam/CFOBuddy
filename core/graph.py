@@ -7,6 +7,7 @@ from langgraph.graph import StateGraph, START, END
 from langgraph.prebuilt import tools_condition
 from langsmith import traceable
 
+from core.guardrails import sanitize_response, validate_chat_input
 from core.schemas import RouteTarget, State
 from core.memory import checkpointer
 from core.llm import llm
@@ -233,6 +234,36 @@ def llm_route(message_content: str) -> str:
 # NODES
 # ══════════════════════════════════════════════════════════════════════════════
 
+def _last_human_content(state: State) -> str:
+    for message in reversed(state["messages"]):
+        if getattr(message, "type", "") == "human":
+            return str(getattr(message, "content", "") or "")
+    return ""
+
+
+def _sanitize_ai_response(response: AIMessage) -> AIMessage:
+    if getattr(response, "tool_calls", None):
+        return response
+    if isinstance(response.content, str):
+        response.content = sanitize_response(response.content)
+    return response
+
+
+@traceable(run_type="chain")
+def guardrail_node(state: State) -> dict:
+    """Before-agent middleware: block unsafe input before routing or tool use."""
+    result = validate_chat_input(_last_human_content(state))
+    if result.allowed:
+        return {"guardrail_blocked": False}
+    return {
+        "guardrail_blocked": True,
+        "messages": [AIMessage(content=result.message)],
+    }
+
+
+def route_after_guardrails(state: State) -> str:
+    return END if state.get("guardrail_blocked", False) else "upload_node"
+
 @traceable(run_type="chain")
 def upload_node(state: State) -> dict:
     """Placeholder for future file-upload handling."""
@@ -256,7 +287,7 @@ def model_node(state: State) -> dict:
     No pre-emptive heuristics — the LLM decides which tools to call.
     """
     messages = [SystemMessage(content=_prompts.system)] + list(state["messages"])
-    response = llm_with_tools.invoke(messages)
+    response = _sanitize_ai_response(llm_with_tools.invoke(messages))
     return {"messages": [response]}
 
 
@@ -347,11 +378,11 @@ def sql_node(state: State, config: RunnableConfig) -> dict:
     """SQL expert node — handles all database queries."""
     direct_response = _try_direct_average_query(state, config)
     if direct_response is not None:
-        return {"messages": [direct_response]}
+        return {"messages": [_sanitize_ai_response(direct_response)]}
 
     messages = [SystemMessage(content=_prompts.sql_expert)] + list(state["messages"])
     try:
-        response = llm_sql.invoke(messages)
+        response = _sanitize_ai_response(llm_sql.invoke(messages))
     except Exception as exc:
         return {
             "messages": [
@@ -376,7 +407,7 @@ def finance_node(state: State) -> dict:
     which tool to call and with what arguments, just like every other node.
     """
     messages = [SystemMessage(content=_prompts.finance)] + list(state["messages"])
-    response = llm_finance.invoke(messages)
+    response = _sanitize_ai_response(llm_finance.invoke(messages))
     return {"messages": [response]}
 
 
@@ -384,7 +415,7 @@ def finance_node(state: State) -> dict:
 def web_search_node(state: State) -> dict:
     """Web search node — external information queries."""
     messages = [SystemMessage(content=_prompts.web_search)] + list(state["messages"])
-    response = llm_web_search.invoke(messages)
+    response = _sanitize_ai_response(llm_web_search.invoke(messages))
     return {"messages": [response]}
 
 
@@ -424,6 +455,7 @@ def _make_loop_or_end(agent_node_name: str):
 graph_builder = StateGraph(State)
 
 # ── nodes ──────────────────────────────────────────────────────────────────
+graph_builder.add_node("guardrails",       guardrail_node)
 graph_builder.add_node("upload_node",      upload_node)
 graph_builder.add_node("model",            model_node)
 graph_builder.add_node("sql_node",         sql_node)
@@ -436,7 +468,12 @@ graph_builder.add_node("finance_tools",    _make_counting_tool_node(finance_tool
 graph_builder.add_node("web_search_tools", _make_counting_tool_node(web_search_tool_node))
 
 # ── entry ──────────────────────────────────────────────────────────────────
-graph_builder.add_edge(START, "upload_node")
+graph_builder.add_edge(START, "guardrails")
+graph_builder.add_conditional_edges(
+    "guardrails",
+    route_after_guardrails,
+    {"upload_node": "upload_node", END: END},
+)
 
 # ── LLM router ─────────────────────────────────────────────────────────────
 graph_builder.add_conditional_edges(

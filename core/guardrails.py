@@ -175,9 +175,17 @@ def validate_sql(sql: str, allowed_tables: set[str] | None = None) -> GuardrailR
 
 def extract_referenced_tables(sql: str) -> set[str]:
     references: set[str] = set()
+    cte_names = {
+        match.group(1).strip('"')
+        for match in re.finditer(
+            r"(?:with|,)\s+([a-zA-Z_][\w$]*|\"[^\"]+\")\s+as\s*\(",
+            sql,
+            re.IGNORECASE,
+        )
+    }
     for match in re.finditer(r"\b(?:from|join)\s+([a-zA-Z_][\w$]*|\"[^\"]+\")", sql, re.IGNORECASE):
         table = match.group(1).strip('"')
-        if table.lower() not in {"select"}:
+        if table.lower() not in {"select"} and table not in cte_names:
             references.add(table)
     return references
 
