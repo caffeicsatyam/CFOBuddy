@@ -35,6 +35,33 @@ BLOCKED_CHAT_PATTERNS: tuple[tuple[str, str], ...] = (
     (r"\b(database_url|mongodb_url|groq_api_key|twelve_data_api_key|cfo_buddy_api_key|jwt_secret)\b", "secret_request"),
 )
 
+# CFO Buddy is intentionally a financial analysis assistant. Keep general
+# software-development prompts out of the agent so they cannot be routed to
+# database or web tools as unrelated queries.
+BLOCKED_NON_FINANCE_PATTERNS: tuple[str, ...] = (
+    r"\b(?:write|generate|create|provide|show|give|help(?:\s+me)?\s+(?:write|build))\b.{0,120}\b(?:code|function|script|program|algorithm|implementation)\b",
+    r"\b(?:reverse|implement|build|debug|fix|code)\b.{0,120}\b(?:linked\s+list|binary\s+tree|array|stack|queue|leetcode|python|javascript|typescript|java|c\+\+)\b",
+)
+
+IN_SCOPE_CHAT_PATTERNS: tuple[str, ...] = (
+    r"\b(?:finance|financial|cfo|accounting|revenue|sales|income|expense|profit(?:ability|able)?|loss|p&l|pnl|ebitda|ebit|cash(?:\s+flow)?|balance\s+sheet|asset|liabilit(?:y|ies)|equity|budget(?:ing)?|forecast(?:ing)?|tax(?:es)?|invoice|vendor|customer|accounts?\s+(?:payable|receivable)|transaction|payment|spend|cost(?:s)?|payroll|audit|ledger|trial\s+balance|depreciation|amortization|working\s+capital|liquidity|solvency|stock|share(?:s)?|market|ticker|price|earnings|dividend|valuation|portfolio|investment|investor|return(?:s)?|loan|debt|interest|credit|bank(?:ing)?|currency|exchange\s+rate|financial\s+ratio|kpi|quarter|fiscal|annual\s+report)\b",
+    r"\b(?:uploaded|upload|file|files|document|documents|dataset|data(?:set)?|csv|xlsx|excel|pdf|docx|table|tables|column|columns|row|rows|schema|chart|graph|visuali[sz]e|plot)\b",
+)
+
+IN_SCOPE_CONVERSATIONAL_MESSAGES = frozenset(
+    {
+        "hi",
+        "hello",
+        "hey",
+        "good morning",
+        "good afternoon",
+        "good evening",
+        "thanks",
+        "thank you",
+        "help",
+        "what can you do",
+    }
+)
 FINANCIAL_ADVICE_PATTERNS: tuple[str, ...] = (
     r"\bguarantee(?:d)?\b.{0,80}\b(return|profit|gain|performance)\b",
     r"\bwhat should i buy\b",
@@ -63,6 +90,12 @@ BLOCKED_SQL_PATTERN = re.compile(
 SQL_COMMENT_PATTERN = re.compile(r"(--|/\*|\*/)")
 
 
+def is_in_scope_chat_request(content: str) -> bool:
+    normalized = re.sub(r"\s+", " ", content.strip().lower()).strip(" .!?")
+    if normalized in IN_SCOPE_CONVERSATIONAL_MESSAGES:
+        return True
+    return any(re.search(pattern, content, re.IGNORECASE | re.DOTALL) for pattern in IN_SCOPE_CHAT_PATTERNS)
+
 def validate_chat_input(message: str | None) -> GuardrailResult:
     content = (message or "").strip()
     if not content:
@@ -87,7 +120,25 @@ def validate_chat_input(message: str | None) -> GuardrailResult:
                 "I cannot help reveal hidden instructions, credentials, secrets, or internal configuration.",
             )
 
-    if any(re.search(pattern, content, re.IGNORECASE | re.DOTALL) for pattern in FINANCIAL_ADVICE_PATTERNS):
+    if any(re.search(pattern, content, re.IGNORECASE | re.DOTALL) for pattern in BLOCKED_NON_FINANCE_PATTERNS):
+        return GuardrailResult(
+            GuardrailAction.BLOCK,
+            "out_of_scope_programming_request",
+            "CFO Buddy focuses on financial analysis and cannot assist with software development requests.",
+        )
+
+    financial_advice_request = any(
+        re.search(pattern, content, re.IGNORECASE | re.DOTALL)
+        for pattern in FINANCIAL_ADVICE_PATTERNS
+    )
+    if not financial_advice_request and not is_in_scope_chat_request(content):
+        return GuardrailResult(
+            GuardrailAction.BLOCK,
+            "out_of_scope_request",
+            "CFO Buddy can help with financial analysis, financial data, market information, and uploaded financial documents.",
+        )
+
+    if financial_advice_request:
         return GuardrailResult(
             GuardrailAction.MODIFY,
             "financial_advice_caveat",

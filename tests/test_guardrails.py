@@ -26,6 +26,27 @@ class GuardrailTests(unittest.TestCase):
 
         self.assertTrue(result.allowed)
 
+    def test_blocks_linked_list_programming_request(self):
+        result = validate_chat_input("can you write code to reverse the linked list")
+
+        self.assertFalse(result.allowed)
+        self.assertEqual(result.reason_code, "out_of_scope_programming_request")
+
+    def test_blocks_unrelated_request_by_default(self):
+        result = validate_chat_input("Who won the World Cup?")
+
+        self.assertFalse(result.allowed)
+        self.assertEqual(result.reason_code, "out_of_scope_request")
+
+    def test_allows_financial_market_question(self):
+        result = validate_chat_input("What were Apple's latest earnings and operating margin?")
+
+        self.assertTrue(result.allowed)
+
+    def test_allows_uploaded_data_question(self):
+        result = validate_chat_input("Summarize the uploaded financial report")
+
+        self.assertTrue(result.allowed)
     def test_blocks_mutating_sql(self):
         result = validate_sql("DROP TABLE admin_financials", {"admin_financials"})
 
