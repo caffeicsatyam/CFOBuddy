@@ -155,6 +155,10 @@ export default function Dashboard() {
     setAuthError(null);
   }, []);
 
+  const handleThreadsLoaded = useCallback((ids: string[]) => {
+    setKnownThreadIds(new Set(ids));
+  }, []);
+
   const handleFileUpload = useCallback(async (file: File) => {
     const uploadMessageId = createId();
     const assistantId = createId();
@@ -604,7 +608,7 @@ export default function Dashboard() {
         isOpen={sidebarOpen}
         onToggle={() => setSidebarOpen((s) => !s)}
         onLogout={handleLogout}
-        onThreadsLoaded={(ids) => setKnownThreadIds(new Set(ids))}
+        onThreadsLoaded={handleThreadsLoaded}
       />
 
       <main className="chat-main">

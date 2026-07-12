@@ -11,12 +11,9 @@ from plotly.subplots import make_subplots
 
 from langchain_core.tools import tool
 
-try:
-    from models.chart import Chart, Session
-    DB_ENABLED = Session is not None
-except ImportError:
-    DB_ENABLED = False
-
+# Charts are stored as static Plotly HTML files. The previous optional
+# models.chart import pointed at a model that is not part of this codebase.
+DB_ENABLED = False
 CHART_STORAGE_PATH = Path("static/charts")
 CHART_STORAGE_PATH.mkdir(parents=True, exist_ok=True)
 
@@ -274,26 +271,6 @@ def generate_chart(
     chart_filename = Path(chart_path).name
     chart_url      = f"/charts/{chart_filename}"
 
-    if DB_ENABLED:
-        try:
-            session      = Session()
-            chart_record = Chart(
-                chart_type  = chart_type,
-                title       = title,
-                file_path   = chart_path,
-                file_url    = chart_url,
-                x_label     = x_label or "X-Axis",
-                y_label     = y_label or "Y-Axis",
-                description = description or f"{chart_type.capitalize()} chart: {title}",
-                data_points = len(data),
-                thread_id   = thread_id,
-            )
-            session.add(chart_record)
-            session.commit()
-            session.close()
-        except Exception as db_error:
-            print(f"Warning: could not save chart to database: {db_error}")
-
     chart_meta = json.dumps({"url": chart_url, "title": title, "type": chart_type})
 
     return (
@@ -425,22 +402,8 @@ def list_charts(thread_id: Optional[str] = None, limit: int = 10) -> str:
         thread_id: Optional thread ID to filter by conversation
         limit:     Max charts to return (default 10)
     """
-    if not DB_ENABLED:
-        # Fall back to listing files on disk
-        files = sorted(CHART_STORAGE_PATH.glob("chart_*.html"), reverse=True)[:limit]
-        if not files:
-            return "No charts found."
-        result = [{"file": f.name, "url": f"/charts/{f.name}"} for f in files]
-        return json.dumps(result, indent=2)
-
-    try:
-        session = Session()
-        query   = session.query(Chart)
-        if thread_id:
-            query = query.filter(Chart.thread_id == thread_id)
-        charts     = query.order_by(Chart.created_at.desc()).limit(limit).all()
-        chart_list = [chart.to_dict() for chart in charts]
-        session.close()
-        return json.dumps(chart_list, indent=2) if chart_list else "No charts found."
-    except Exception as e:
-        return f"Error listing charts: {e}"
+    files = sorted(CHART_STORAGE_PATH.glob("chart_*.html"), reverse=True)[:limit]
+    if not files:
+        return "No charts found."
+    result = [{"file": f.name, "url": f"/charts/{f.name}"} for f in files]
+    return json.dumps(result, indent=2)

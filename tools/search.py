@@ -20,6 +20,8 @@ load_dotenv()
 
 logger = logging.getLogger(__name__)
 TABLE_NAME = "data_cfo_buddy_vectors"
+DEFAULT_EMBED_DIM = 4096 if os.getenv("NVIDIA_EMBEDDING_API_KEY") else 384
+VECTOR_EMBED_DIM = int(os.getenv("VECTOR_EMBED_DIM", str(DEFAULT_EMBED_DIM)))
 _settings_configured = False
 
 
@@ -81,7 +83,7 @@ def get_vector_store() -> PGVectorStore:
         port=url.port or 5432,
         user=url.username,
         table_name=TABLE_NAME,
-        embed_dim=4096,
+        embed_dim=VECTOR_EMBED_DIM,
         hybrid_search=True,
         text_search_config="english",
     )

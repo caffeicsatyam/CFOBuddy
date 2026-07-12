@@ -21,6 +21,16 @@ interface ChartPreview {
   isHtml: boolean;
 }
 
+function stripChartPayload(content: string): string {
+  const markerIndex = Math.min(
+    ...['CHART_JSON:', 'CHART_DATA:']
+      .map((marker) => content.indexOf(marker))
+      .filter((index) => index >= 0),
+  );
+
+  return Number.isFinite(markerIndex) ? content.slice(0, markerIndex).trim() : content;
+}
+
 function extractChartPath(message: Message): string | null {
   const chartCandidateKeys = ['url', 'file_url', 'chart_url', 'path'];
 
@@ -34,7 +44,7 @@ function extractChartPath(message: Message): string | null {
   }
 
   // Match both .html and .png chart URLs from message content
-  const match = message.content.match(/\/charts\/[^\s`)"']+\.(?:html|png)/);
+  const match = stripChartPayload(message.content).match(/\/charts\/[^\s`)"']+\.(?:html|png)/);
   return match ? match[0] : null;
 }
 
@@ -144,7 +154,7 @@ export default function ChatArea({ messages, isTyping, onSuggestionClick }: Prop
                     }`}
                   >
                     <div className={styles.content}>
-                      {msg.content.split('\n').map((line, i) => (
+                      {stripChartPayload(msg.content).split('\n').map((line, i) => (
                         <span key={i}>
                           {line}
                           <br />

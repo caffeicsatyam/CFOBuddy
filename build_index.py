@@ -19,6 +19,8 @@ logger = configure_logging()
 
 DATA_FOLDER = "data"
 TABLE_NAME = "data_cfo_buddy_vectors"
+DEFAULT_EMBED_DIM = 4096 if os.getenv("NVIDIA_EMBEDDING_API_KEY") else 384
+VECTOR_EMBED_DIM = int(os.getenv("VECTOR_EMBED_DIM", str(DEFAULT_EMBED_DIM)))
 ALLOWED_EXTENSIONS = {".csv", ".pdf", ".xlsx", ".xls", ".docx"}
 INDEX_MANIFEST_PATH = Path(DATA_FOLDER) / ".index_manifest.json"
 
@@ -149,7 +151,7 @@ def build_index(
         password=os.getenv("NEON_PASSWORD"),
         port="5432",
         table_name=TABLE_NAME,
-        embed_dim=4096,
+        embed_dim=VECTOR_EMBED_DIM,
         hybrid_search=True,
         text_search_config="english",
     )

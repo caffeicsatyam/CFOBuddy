@@ -28,6 +28,7 @@ from pydantic import BaseModel
 
 from build_index import build_index
 from cfobuddy_logging import configure_logging
+from core.guardrails import sanitize_response, validate_chat_input
 from load_data import load_csvs_to_neon
 from core.user_scope import user_storage_key
 
@@ -156,12 +157,30 @@ class UserResponse(BaseModel):
     auth_type: str
 
 # Status tracking
-indexing_status = {"status": "ready", "message": "Idle"}
+indexing_status_by_user: dict[str, dict[str, str]] = {}
+
+
+def _indexing_key(username: str | None) -> str:
+    return user_storage_key(username or AUTH_USERNAME)
+
+
+def _set_indexing_status(username: str | None, status: str, message: str) -> None:
+    indexing_status_by_user[_indexing_key(username)] = {
+        "status": status,
+        "message": message,
+    }
+
+
+def _get_indexing_status(username: str | None) -> dict[str, str]:
+    return indexing_status_by_user.get(
+        _indexing_key(username),
+        {"status": "ready", "message": "Idle"},
+    )
+
 
 def build_index_with_status(file_path: str | None = None, username: str | None = None) -> None:
-    global indexing_status
     target = Path(file_path).name if file_path else "documents"
-    indexing_status = {"status": "indexing", "message": f"Indexing {target}"}
+    _set_indexing_status(username, "indexing", f"Indexing {target}")
     try:
         indexed_count = build_index([file_path] if file_path else None, username=username)
         try:
@@ -175,10 +194,10 @@ def build_index_with_status(file_path: str | None = None, username: str | None =
             message = "Document is already indexed"
         else:
             message = f"Indexed {indexed_count} document section(s)"
-        indexing_status = {"status": "ready", "message": message}
+        _set_indexing_status(username, "ready", message)
     except Exception as exc:
         logger.exception("Index build failed")
-        indexing_status = {"status": "error", "message": str(exc)}
+        _set_indexing_status(username, "error", str(exc))
 
 
 def remember_upload_in_thread(thread_id: str | None, filename: str, username: str) -> None:
@@ -300,11 +319,7 @@ def parse_chart_payload(content: str) -> Optional[dict[str, Any]]:
     return None
 
 def remove_chart_payload(content: str) -> str:
-    clean = content
-    for marker in ("CHART_JSON:", "CHART_DATA:"):
-        if marker in clean:
-            clean = clean.split(marker, maxsplit=1)[0].strip()
-    return clean
+    return sanitize_response(content)
 
 def parse_response(messages: list[Any]) -> tuple[str, Optional[dict[str, Any]]]:
     text = ""
@@ -366,7 +381,11 @@ async def get_threads(payload: dict[str, Any] = Depends(require_auth)) -> Thread
         raise HTTPException(status_code=500, detail=str(exc))
 
 @router.delete("/threads/{thread_id}")
-async def remove_thread(thread_id: str) -> dict[str, str]:
+async def remove_thread(
+    thread_id: str,
+    payload: dict[str, Any] = Depends(require_auth),
+) -> dict[str, str]:
+    await ensure_thread_access(thread_id, payload)
     from core.memory import delete_thread
     success = delete_thread(thread_id)
     if not success:
@@ -377,6 +396,15 @@ async def remove_thread(thread_id: str) -> dict[str, str]:
 async def chat(request: ChatRequest, payload: dict[str, Any] = Depends(require_auth)) -> ChatResponse:
     username = payload.get("sub", AUTH_USERNAME)
     auth_type = payload.get("auth_type", "jwt")
+    guardrail = validate_chat_input(request.message)
+    if not guardrail.allowed:
+        logger.info(
+            "guardrail_decision action=block reason=%s route=chat user=%s",
+            guardrail.reason_code,
+            username,
+        )
+        raise HTTPException(status_code=400, detail=guardrail.message)
+    guarded_message = guardrail.content or request.message.strip()
     
     if auth_type != "api_key" and username != "legacy-api-key":
         db = get_db()
@@ -387,7 +415,7 @@ async def chat(request: ChatRequest, payload: dict[str, Any] = Depends(require_a
     try:
         response = await asyncio.to_thread(
             CFOBuddy.invoke,
-            {"messages": [HumanMessage(content=request.message)]},
+            {"messages": [HumanMessage(content=guarded_message)]},
             config=config,
         )
         text, chart = parse_response(response["messages"])
@@ -400,6 +428,15 @@ async def chat(request: ChatRequest, payload: dict[str, Any] = Depends(require_a
 async def chat_stream(request: ChatRequest, payload: dict[str, Any] = Depends(require_auth)) -> StreamingResponse:
     username = payload.get("sub", AUTH_USERNAME)
     auth_type = payload.get("auth_type", "jwt")
+    guardrail = validate_chat_input(request.message)
+    if not guardrail.allowed:
+        logger.info(
+            "guardrail_decision action=block reason=%s route=chat_stream user=%s",
+            guardrail.reason_code,
+            username,
+        )
+        raise HTTPException(status_code=400, detail=guardrail.message)
+    guarded_message = guardrail.content or request.message.strip()
     
     if auth_type != "api_key" and username != "legacy-api-key":
         db = get_db()
@@ -415,17 +452,23 @@ async def chat_stream(request: ChatRequest, payload: dict[str, Any] = Depends(re
         loop = asyncio.get_running_loop()
 
         def stream_in_thread() -> None:
+            suppress_stream_tokens = False
             try:
                 for message_chunk, _metadata in CFOBuddy.stream(
-                    {"messages": [HumanMessage(content=request.message)]},
+                    {"messages": [HumanMessage(content=guarded_message)]},
                     config=config,
                     stream_mode="messages",
                 ):
                     token = text_from_stream_content(getattr(message_chunk, "content", ""))
-                    if token:
+                    if not token or suppress_stream_tokens:
+                        continue
+                    safe_token = sanitize_response(token)
+                    if "CHART_JSON:" in token or "CHART_DATA:" in token:
+                        suppress_stream_tokens = True
+                    if safe_token:
                         loop.call_soon_threadsafe(
                             queue.put_nowait,
-                            sse_event("token", {"token": token}),
+                            sse_event("token", {"token": safe_token}),
                         )
 
                 state = CFOBuddy.get_state(config)
@@ -513,10 +556,27 @@ async def upload_file(
     background_tasks.add_task(build_index_with_status, str(filepath), username)
     return UploadResponse(message=f"'{filename}' uploaded successfully", filename=filename, thread_id=thread_id)
 
+async def ensure_thread_access(thread_id: str, payload: dict[str, Any]) -> None:
+    username = str(payload.get("sub", AUTH_USERNAME))
+    auth_type = str(payload.get("auth_type", "jwt"))
+    if auth_type == "api_key" or username == "legacy-api-key":
+        return
+
+    db = get_db()
+    user = await db.users.find_one({"username": username})
+    if not user or thread_id not in user.get("threads", []):
+        raise HTTPException(status_code=404, detail="Thread not found")
+
+
 @router.get("/threads/{thread_id}/history", response_model=ThreadHistoryResponse)
-async def get_history(thread_id: str) -> ThreadHistoryResponse:
+async def get_history(
+    thread_id: str,
+    payload: dict[str, Any] = Depends(require_auth),
+) -> ThreadHistoryResponse:
+    await ensure_thread_access(thread_id, payload)
     from core.graph import CFOBuddy
-    config = {"configurable": {"thread_id": thread_id}}
+    username = str(payload.get("sub", AUTH_USERNAME))
+    config = {"configurable": {"thread_id": thread_id, "username": username}}
     try:
         state = CFOBuddy.get_state(config)
         messages = state.values.get("messages", [])
@@ -557,8 +617,8 @@ async def get_history(thread_id: str) -> ThreadHistoryResponse:
         raise HTTPException(status_code=404, detail=str(exc))
 
 @router.get("/indexing_status")
-async def get_indexing_status() -> dict[str, str]:
-    return indexing_status
+async def get_indexing_status(payload: dict[str, Any] = Depends(require_auth)) -> dict[str, str]:
+    return _get_indexing_status(str(payload.get("sub", AUTH_USERNAME)))
 
 @app.get("/charts/{filename}", tags=["Charts"])
 async def serve_chart(filename: str) -> FastAPIFileResponse:

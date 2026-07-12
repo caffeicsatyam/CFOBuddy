@@ -46,7 +46,7 @@ export default function Sidebar({
       }
     }
     loadThreads();
-  }, []);
+  }, [onThreadsLoaded]);
 
   const handleDelete = useCallback(
     async (threadId: string, e: React.MouseEvent) => {
