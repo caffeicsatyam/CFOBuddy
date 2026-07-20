@@ -18,10 +18,10 @@ export default function Navbar() {
 
         {/* Desktop links */}
         <ul className={styles.links}>
-          {['Dashboard', 'Features', 'Pricing'].map((item) => (
+          {['Features'].map((item) => (
             <li key={item}>
               <Link
-                href={item === 'Dashboard' ? '/dashboard' : `#${item.toLowerCase()}`}
+                href={`#${item.toLowerCase()}`}
                 className={styles.link}
               >
                 {item}
@@ -32,8 +32,11 @@ export default function Navbar() {
 
         {/* CTA */}
         <div className={styles.actions}>
-          <Link href="/dashboard" className="btn btn-primary btn-sm">
-            Try CFOBuddy →
+          <Link href="/login" className={styles.link} style={{ marginRight: '0.5rem' }}>
+            Sign in
+          </Link>
+          <Link href="/signup" className="btn btn-accent btn-sm">
+            Get started →
           </Link>
           <button
             className={styles.burger}
@@ -50,18 +53,21 @@ export default function Navbar() {
       {/* Mobile menu */}
       {menuOpen && (
         <div className={styles.mobile}>
-          {['Dashboard', 'Features', 'Pricing'].map((item) => (
+          {['Features'].map((item) => (
             <Link
               key={item}
-              href={item === 'Dashboard' ? '/dashboard' : `#${item.toLowerCase()}`}
+              href={`#${item.toLowerCase()}`}
               className={styles.mobileLink}
               onClick={() => setMenuOpen(false)}
             >
               {item}
             </Link>
           ))}
-          <Link href="/dashboard" className="btn btn-primary btn-sm" onClick={() => setMenuOpen(false)}>
-            Try CFOBuddy →
+          <Link href="/login" className={styles.mobileLink} onClick={() => setMenuOpen(false)}>
+            Sign in
+          </Link>
+          <Link href="/signup" className="btn btn-accent btn-sm" onClick={() => setMenuOpen(false)}>
+            Get started →
           </Link>
         </div>
       )}
