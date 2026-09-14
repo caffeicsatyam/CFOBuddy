@@ -266,17 +266,30 @@ def guardrail_node(state: State) -> dict:
 def route_after_guardrails(state: State) -> str:
     return END if state.get("guardrail_blocked", False) else "upload_node"
 
-@traceable(run_type="chain")
-def upload_node(state: State) -> dict:
-    """Placeholder for future file-upload handling."""
-    return {}
-
+import time
 from core.router import fast_route
 
 
 @traceable(run_type="chain")
+def upload_node(state: State) -> dict:
+    """Evaluate routing decision and record routing latency."""
+    last_message = state["messages"][-1]
+    content = str(getattr(last_message, "content", "") or "")
+    start_t = time.perf_counter()
+    target = fast_route(content)
+    latency_ms = (time.perf_counter() - start_t) * 1000.0
+    return {
+        "routing_target": target,
+        "routing_latency_ms": round(latency_ms, 2),
+    }
+
+
+@traceable(run_type="chain")
 def route_after_upload(state: State) -> str:
-    """Fast embedding-based router — avoids the extra LLM API call."""
+    """Fast embedding-based router — uses precomputed routing decision."""
+    target = state.get("routing_target")
+    if target:
+        return target
     last_message = state["messages"][-1]
     content = getattr(last_message, "content", "") or ""
     return fast_route(str(content))

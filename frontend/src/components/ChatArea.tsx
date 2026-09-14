@@ -168,18 +168,13 @@ export default function ChatArea({ messages, isTyping, onSuggestionClick }: Prop
                           <span className={styles.chartLabel}>{chartPreview.title}</span>
                         </div>
                         {chartPreview.isHtml ? (
-                          <iframe
-                            src={chartPreview.src}
-                            title={chartPreview.title}
-                            className={styles.chartIframe}
-                            style={{
-                              width: '100%',
-                              height: '300px',
-                              border: 'none',
-                              borderRadius: '8px',
-                              pointerEvents: 'none',
-                            }}
-                          />
+                          <div className={styles.chartTeaser}>
+                            <div className={styles.chartTeaserInfo}>
+                              <span className={styles.chartTeaserTitle}>📊 Interactive Financial Chart</span>
+                              <span className={styles.chartTeaserSub}>Click anywhere to expand full interactive visualization</span>
+                            </div>
+                            <span className={styles.chartOpenBadge}>Expand ↗</span>
+                          </div>
                         ) : (
                           <Image
                             src={chartPreview.src}

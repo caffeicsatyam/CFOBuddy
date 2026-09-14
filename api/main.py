@@ -2,6 +2,7 @@ import asyncio
 import json
 import os
 import secrets
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Optional
@@ -15,6 +16,7 @@ from fastapi import (
     File,
     Form,
     HTTPException,
+    Request,
     Security,
     UploadFile,
     status,
@@ -79,6 +81,18 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+@app.middleware("http")
+async def add_process_time_and_logging_header(request: Request, call_next):
+    start_time = time.perf_counter()
+    response = await call_next(request)
+    process_time = (time.perf_counter() - start_time) * 1000
+    response.headers["X-Process-Time-Ms"] = f"{process_time:.2f}"
+    if request.url.path not in ("/health", "/healthz"):
+        logger.info(
+            f"{request.method} {request.url.path} -> {response.status_code} ({process_time:.1f}ms)"
+        )
+    return response
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/login", auto_error=False)
 
@@ -246,6 +260,37 @@ async def root() -> dict[str, str]:
 async def health() -> dict[str, str]:
     return {"status": "ok"}
 
+@app.get("/healthz", tags=["Health"])
+async def healthz() -> dict[str, Any]:
+    checks: dict[str, Any] = {"api": "ok", "mongodb": "unknown", "database": "unknown"}
+    status_code = 200
+
+    db = get_db()
+    if db is not None:
+        try:
+            await db.client.admin.command("ping")
+            checks["mongodb"] = "connected"
+        except Exception as e:
+            checks["mongodb"] = f"error: {str(e)[:60]}"
+            status_code = 503
+    else:
+        checks["mongodb"] = "not_initialized"
+
+    db_url = os.getenv("DATABASE_URL")
+    if db_url:
+        try:
+            from tools.sql import get_available_tables
+            get_available_tables("admin")
+            checks["database"] = "connected"
+        except Exception as e:
+            checks["database"] = f"error: {str(e)[:60]}"
+    else:
+        checks["database"] = "not_configured"
+
+    if status_code != 200:
+        raise HTTPException(status_code=status_code, detail=checks)
+    return checks
+
 @app.post("/auth/register", response_model=UserResponseModel, tags=["Auth"])
 async def register(user_in: UserCreate):
     db = get_db()
@@ -394,9 +439,14 @@ async def remove_thread(
 
 @router.post("/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest, payload: dict[str, Any] = Depends(require_auth)) -> ChatResponse:
+    t_start = time.perf_counter()
     username = payload.get("sub", AUTH_USERNAME)
     auth_type = payload.get("auth_type", "jwt")
+
+    g_start = time.perf_counter()
     guardrail = validate_chat_input(request.message)
+    guardrail_latency_ms = (time.perf_counter() - g_start) * 1000.0
+
     if not guardrail.allowed:
         logger.info(
             "guardrail_decision action=block reason=%s route=chat user=%s",
@@ -411,14 +461,44 @@ async def chat(request: ChatRequest, payload: dict[str, Any] = Depends(require_a
         await db.users.update_one({"username": username}, {"$addToSet": {"threads": request.thread_id}})
 
     from core.graph import CFOBuddy
-    config = {"configurable": {"thread_id": request.thread_id, "username": username}}
+    from core.observability import ObservabilityCallbackHandler, record_query_telemetry
+
+    obs_handler = ObservabilityCallbackHandler()
+    config = {
+        "configurable": {"thread_id": request.thread_id, "username": username},
+        "callbacks": [obs_handler],
+        "tags": ["cfobuddy", f"user:{username}", f"session:{request.thread_id}"],
+        "metadata": {"user_id": username, "session_id": request.thread_id, "thread_id": request.thread_id},
+    }
     try:
         response = await asyncio.to_thread(
             CFOBuddy.invoke,
             {"messages": [HumanMessage(content=guarded_message)]},
             config=config,
         )
+        total_latency_ms = (time.perf_counter() - t_start) * 1000.0
         text, chart = parse_response(response["messages"])
+
+        try:
+            state = CFOBuddy.get_state(config)
+            routing_target = state.values.get("routing_target", "model")
+            routing_latency_ms = state.values.get("routing_latency_ms", 0.0)
+        except Exception:
+            routing_target = "model"
+            routing_latency_ms = 0.0
+
+        asyncio.create_task(record_query_telemetry(
+            user_id=username,
+            session_id=request.thread_id,
+            query=request.message,
+            response_preview=text,
+            routing_target=routing_target,
+            routing_latency_ms=routing_latency_ms,
+            guardrails_latency_ms=guardrail_latency_ms,
+            total_latency_ms=total_latency_ms,
+            callback_handler=obs_handler,
+        ))
+
         return ChatResponse(response=text, thread_id=request.thread_id, chart=chart)
     except Exception as exc:
         logger.exception("Chat request failed")
@@ -426,9 +506,14 @@ async def chat(request: ChatRequest, payload: dict[str, Any] = Depends(require_a
 
 @router.post("/chat/stream")
 async def chat_stream(request: ChatRequest, payload: dict[str, Any] = Depends(require_auth)) -> StreamingResponse:
+    t_start = time.perf_counter()
     username = payload.get("sub", AUTH_USERNAME)
     auth_type = payload.get("auth_type", "jwt")
+
+    g_start = time.perf_counter()
     guardrail = validate_chat_input(request.message)
+    guardrail_latency_ms = (time.perf_counter() - g_start) * 1000.0
+
     if not guardrail.allowed:
         logger.info(
             "guardrail_decision action=block reason=%s route=chat_stream user=%s",
@@ -443,8 +528,15 @@ async def chat_stream(request: ChatRequest, payload: dict[str, Any] = Depends(re
         await db.users.update_one({"username": username}, {"$addToSet": {"threads": request.thread_id}})
 
     from core.graph import CFOBuddy
+    from core.observability import ObservabilityCallbackHandler, record_query_telemetry
 
-    config = {"configurable": {"thread_id": request.thread_id, "username": username}}
+    obs_handler = ObservabilityCallbackHandler()
+    config = {
+        "configurable": {"thread_id": request.thread_id, "username": username},
+        "callbacks": [obs_handler],
+        "tags": ["cfobuddy", f"user:{username}", f"session:{request.thread_id}"],
+        "metadata": {"user_id": username, "session_id": request.thread_id, "thread_id": request.thread_id},
+    }
 
     async def event_stream():
         queue: asyncio.Queue[Any] = asyncio.Queue()
@@ -473,6 +565,25 @@ async def chat_stream(request: ChatRequest, payload: dict[str, Any] = Depends(re
 
                 state = CFOBuddy.get_state(config)
                 text, chart = parse_response(state.values.get("messages", []))
+                total_latency_ms = (time.perf_counter() - t_start) * 1000.0
+                routing_target = state.values.get("routing_target", "model")
+                routing_latency_ms = state.values.get("routing_latency_ms", 0.0)
+
+                asyncio.run_coroutine_threadsafe(
+                    record_query_telemetry(
+                        user_id=username,
+                        session_id=request.thread_id,
+                        query=request.message,
+                        response_preview=text,
+                        routing_target=routing_target,
+                        routing_latency_ms=routing_latency_ms,
+                        guardrails_latency_ms=guardrail_latency_ms,
+                        total_latency_ms=total_latency_ms,
+                        callback_handler=obs_handler,
+                    ),
+                    loop,
+                )
+
                 loop.call_soon_threadsafe(
                     queue.put_nowait,
                     sse_event(
@@ -628,4 +739,43 @@ async def serve_chart(filename: str) -> FastAPIFileResponse:
     media = "text/html" if chart_path.suffix.lower() == ".html" else "image/png"
     return FastAPIFileResponse(chart_path, media_type=media)
 
+# ==============================================================================
+# OBSERVABILITY & TRACING ADMIN ENDPOINTS
+# ==============================================================================
+from core.observability import (
+    get_observability_summary,
+    get_recent_traces,
+    get_session_metrics,
+)
+
+@app.get("/api/admin/observability/stats", tags=["Observability"])
+async def observability_stats(user_id: Optional[str] = None) -> dict[str, Any]:
+    return await get_observability_summary(user_id=user_id)
+
+@app.get("/api/admin/observability/queries", tags=["Observability"])
+async def observability_queries(
+    limit: int = 50,
+    user_id: Optional[str] = None,
+    session_id: Optional[str] = None,
+) -> list[dict[str, Any]]:
+    return await get_recent_traces(limit=limit, user_id=user_id, session_id=session_id)
+
+@app.get("/api/admin/observability/tools", tags=["Observability"])
+async def observability_tools(user_id: Optional[str] = None) -> list[dict[str, Any]]:
+    summary = await get_observability_summary(user_id=user_id)
+    return summary.get("tools", [])
+
+@app.get("/api/admin/observability/sessions", tags=["Observability"])
+async def observability_sessions(user_id: Optional[str] = None) -> list[dict[str, Any]]:
+    return await get_session_metrics(user_id=user_id)
+
+@app.get("/admin/observability", tags=["Observability"])
+@app.get("/observability", tags=["Observability"])
+async def serve_observability_dashboard():
+    dashboard_path = Path("static/observability.html")
+    if not dashboard_path.exists():
+        raise HTTPException(status_code=404, detail="Observability dashboard not found")
+    return FastAPIFileResponse(dashboard_path, media_type="text/html")
+
 app.include_router(router)
+

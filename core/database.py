@@ -14,9 +14,20 @@ class Database:
 db_instance = Database()
 
 async def connect_to_mongo():
-    db_instance.client = AsyncIOMotorClient(MONGODB_URL)
+    db_instance.client = AsyncIOMotorClient(
+        MONGODB_URL,
+        serverSelectionTimeoutMS=5000,
+        connectTimeoutMS=5000,
+        socketTimeoutMS=10000,
+    )
     db_instance.db = db_instance.client[MONGODB_DB_NAME]
-    print(f"Connected to MongoDB at {MONGODB_URL}")
+    # Verify connectivity early so we get a clear error at startup
+    try:
+        await db_instance.client.admin.command("ping")
+        print(f"Connected to MongoDB at {MONGODB_URL}")
+    except Exception as e:
+        print(f"⚠ MongoDB connection failed: {e}")
+        print("  Auth endpoints that require the database will return errors.")
 
 async def close_mongo_connection():
     if db_instance.client:

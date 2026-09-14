@@ -29,9 +29,13 @@ load_dotenv()
 # )
 
 
-# Chat Groq from LANGCHAIN
+# Production-grade Groq LLM configuration
+MODEL_NAME = os.getenv("LLM_MODEL_NAME", "llama-3.3-70b-versatile")
+TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", "0.1"))
+
 llm = ChatGroq(
-    model="llama-3.1-8b-instant",
-    temperature=0.2,
+    model=MODEL_NAME,
+    temperature=TEMPERATURE,
 )
+
 

@@ -135,53 +135,80 @@ export default function Dashboard() {
     }
   }, []);
 
-  const handleSend = useCallback(async () => {
-    if (!inputVal.trim()) return;
-    const userText = inputVal.trim();
-    setInputVal('');
-    const userMsg: Message = { id: createId(), role: 'user', content: userText, timestamp: new Date() };
+  const streamChat = useCallback(async (promptText: string) => {
+    if (!promptText.trim()) return;
+    const userMsg: Message = { id: createId(), role: 'user', content: promptText, timestamp: new Date() };
     const assistantId = createId();
     const assistantMsg: Message = { id: assistantId, role: 'assistant', content: '', timestamp: new Date(), isLoading: true };
     setMessages((prev) => [...prev, userMsg, assistantMsg]);
     setIsTyping(true);
-    try {
-      await sendMessageStream(userText, currentThreadId,
-        (token) => { setMessages((prev) => prev.map((message) => message.id === assistantId ? { ...message, content: `${message.content}${token}` } : message)); },
-        (res) => {
-          setMessages((prev) => prev.map((message) => message.id === assistantId ? { ...message, content: res.response || message.content, chart: res.chart, isLoading: false } : message));
-          setKnownThreadIds((prev) => new Set([...prev, res.thread_id]));
-          setCurrentThreadId(res.thread_id);
-        },
-      );
-    } catch (error) {
-      setMessages((prev) => prev.map((message) => message.id === assistantId ? { ...message, content: `Error: ${error instanceof Error ? error.message : 'Failed to connect to AI'}`, isLoading: false } : message));
-    } finally {
-      setIsTyping(false);
-    }
-  }, [currentThreadId, inputVal]);
 
-  const handleSuggestionClick = useCallback(async (suggestion: string) => {
-    setInputVal('');
-    const userMsg: Message = { id: createId(), role: 'user', content: suggestion, timestamp: new Date() };
-    const assistantId = createId();
-    const assistantMsg: Message = { id: assistantId, role: 'assistant', content: '', timestamp: new Date(), isLoading: true };
-    setMessages((prev) => [...prev, userMsg, assistantMsg]);
-    setIsTyping(true);
+    let accumulatedContent = '';
+    let flushTimeout: NodeJS.Timeout | null = null;
+
+    const flush = () => {
+      setMessages((prev) =>
+        prev.map((message) =>
+          message.id === assistantId ? { ...message, content: accumulatedContent } : message
+        )
+      );
+    };
+
     try {
-      await sendMessageStream(suggestion, currentThreadId,
-        (token) => { setMessages((prev) => prev.map((message) => message.id === assistantId ? { ...message, content: `${message.content}${token}` } : message)); },
+      await sendMessageStream(
+        promptText,
+        currentThreadId,
+        (token) => {
+          accumulatedContent += token;
+          if (!flushTimeout) {
+            flushTimeout = setTimeout(() => {
+              flushTimeout = null;
+              flush();
+            }, 40); // 40ms throttle (~25 renders/sec max instead of 100/sec)
+          }
+        },
         (res) => {
-          setMessages((prev) => prev.map((message) => message.id === assistantId ? { ...message, content: res.response || message.content, chart: res.chart, isLoading: false } : message));
+          if (flushTimeout) {
+            clearTimeout(flushTimeout);
+            flushTimeout = null;
+          }
+          setMessages((prev) =>
+            prev.map((message) =>
+              message.id === assistantId
+                ? { ...message, content: res.response || accumulatedContent, chart: res.chart, isLoading: false }
+                : message
+            )
+          );
           setKnownThreadIds((prev) => new Set([...prev, res.thread_id]));
           setCurrentThreadId(res.thread_id);
         },
       );
     } catch (error) {
-      setMessages((prev) => prev.map((message) => message.id === assistantId ? { ...message, content: `Error: ${error instanceof Error ? error.message : 'Failed to connect to AI'}`, isLoading: false } : message));
+      if (flushTimeout) clearTimeout(flushTimeout);
+      setMessages((prev) =>
+        prev.map((message) =>
+          message.id === assistantId
+            ? { ...message, content: `Error: ${error instanceof Error ? error.message : 'Failed to connect to AI'}`, isLoading: false }
+            : message
+        )
+      );
     } finally {
       setIsTyping(false);
     }
   }, [currentThreadId]);
+
+  const handleSend = useCallback(() => {
+    if (!inputVal.trim()) return;
+    const userText = inputVal.trim();
+    setInputVal('');
+    void streamChat(userText);
+  }, [inputVal, streamChat]);
+
+  const handleSuggestionClick = useCallback((suggestion: string) => {
+    setInputVal('');
+    void streamChat(suggestion);
+  }, [streamChat]);
+
 
   if (authLoading) {
     return (

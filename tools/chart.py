@@ -11,8 +11,6 @@ from plotly.subplots import make_subplots
 
 from langchain_core.tools import tool
 
-# Charts are stored as static Plotly HTML files. The previous optional
-# models.chart import pointed at a model that is not part of this codebase.
 DB_ENABLED = False
 CHART_STORAGE_PATH = Path("static/charts")
 CHART_STORAGE_PATH.mkdir(parents=True, exist_ok=True)

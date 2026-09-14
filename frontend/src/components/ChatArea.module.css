@@ -200,10 +200,58 @@
   background: rgba(255, 255, 255, 0.03);
 }
 
+.chartTeaser {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1.25rem 1.5rem;
+  background: rgba(16, 163, 127, 0.08);
+  border: 1px solid rgba(16, 163, 127, 0.25);
+  border-radius: 0.75rem;
+  gap: 1rem;
+}
+
+.chartTeaserInfo {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.chartTeaserTitle {
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: #ececec;
+}
+
+.chartTeaserSub {
+  font-size: 0.8125rem;
+  color: #9ca3af;
+}
+
+.chartOpenBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: #10a37f;
+  background: rgba(16, 163, 127, 0.15);
+  padding: 0.4rem 0.75rem;
+  border-radius: 0.5rem;
+  flex-shrink: 0;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.chartCard:hover .chartOpenBadge {
+  background: #10a37f;
+  color: #ffffff;
+}
+
 .chartHint {
   font-size: 0.75rem;
   color: #6e6e6e;
 }
+
 
 /* ─── Chart modal ─── */
 .chartModal {
