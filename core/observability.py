@@ -16,6 +16,9 @@ if os.getenv("LANGSMITH_TRACING", "").lower() in ("true", "1") or os.getenv("LAN
 
 # Pricing per 1,000,000 tokens (USD)
 PRICING_PER_1M_TOKENS: dict[str, dict[str, float]] = {
+    "openai/gpt-oss-120b": {"input": 0.59, "output": 0.79},
+    "openai/gpt-oss-20b": {"input": 0.15, "output": 0.20},
+    "qwen/qwen3.8-27b": {"input": 0.20, "output": 0.30},
     "llama-3.3-70b-versatile": {"input": 0.59, "output": 0.79},
     "llama-3.1-70b-versatile": {"input": 0.59, "output": 0.79},
     "llama-3.1-8b-instant": {"input": 0.05, "output": 0.08},

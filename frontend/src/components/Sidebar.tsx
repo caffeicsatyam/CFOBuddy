@@ -202,6 +202,20 @@ export default function Sidebar({
 
       {/* Bottom section – user + logout */}
       <div className={styles.bottomSection}>
+        <a
+          href="http://localhost:8000/admin/observability"
+          target="_blank"
+          rel="noopener noreferrer"
+          className={styles.navItem}
+          title="Open Observability & Tracing Dashboard"
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M3 3v18h18" />
+            <path d="M18 17l-6-6-4 4-5-5" />
+          </svg>
+          <span>Observability</span>
+        </a>
+
         <Link href="/" className={styles.navItem}>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z" />

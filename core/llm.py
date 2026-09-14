@@ -30,7 +30,7 @@ load_dotenv()
 
 
 # Production-grade Groq LLM configuration
-MODEL_NAME = os.getenv("LLM_MODEL_NAME", "llama-3.3-70b-versatile")
+MODEL_NAME = os.getenv("LLM_MODEL_NAME", "openai/gpt-oss-120b")
 TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", "0.1"))
 
 llm = ChatGroq(
