@@ -44,10 +44,16 @@ export function hasAuthToken(): boolean {
 
 async function parseError(res: Response, fallback: string): Promise<never> {
   try {
-    const data = (await res.json()) as { detail?: string; error?: string };
-    throw new Error(data.detail ?? data.error ?? fallback);
+    const text = await res.text();
+    // Only attempt JSON parse if it looks like a JSON response
+    if (text.startsWith('{') || text.startsWith('[')) {
+      const data = JSON.parse(text) as { detail?: string; error?: string };
+      throw new Error(data.detail ?? data.error ?? fallback);
+    }
+    // Non-JSON body (e.g. HTML proxy error page) – use fallback
+    throw new Error(fallback);
   } catch (error) {
-    if (error instanceof Error && error.message) throw error;
+    if (error instanceof Error && error.message !== fallback && !(error instanceof SyntaxError)) throw error;
     throw new Error(fallback);
   }
 }

@@ -300,9 +300,40 @@ a:hover { color: var(--primary); }
 .typing-dot:nth-child(2) { animation-delay: 0.2s; }
 .typing-dot:nth-child(3) { animation-delay: 0.4s; }
 
+/* ─── Streaming text ─── */
+.streaming-text-container {
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+}
+
+.streaming-rendered {
+  /* Already-rendered text, no animation needed */
+}
+
+.streaming-new {
+  animation: tokenFadeIn 0.15s ease-out forwards;
+}
+
+@keyframes tokenFadeIn {
+  from { opacity: 0.4; }
+  to   { opacity: 1; }
+}
+
 /* Cursor blink after streamed text */
+.streaming-cursor {
+  display: inline;
+}
+
 .streaming-cursor::after {
   content: '▋';
   color: var(--on-surface-variant);
   animation: blink 1s step-end infinite;
+  margin-left: 1px;
+  font-size: 0.9em;
+}
+
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0; }
 }

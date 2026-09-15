@@ -3,10 +3,13 @@
 import Image from 'next/image';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
+import Markdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 
 import { getApiBaseUrl } from '../lib/api';
 import type { Message } from '../lib/types';
 import { TypingIndicator } from './LoadingStates';
+import StreamingText from './StreamingText';
 import styles from './ChatArea.module.css';
 
 interface Props {
@@ -144,15 +147,19 @@ export default function ChatArea({ messages, isTyping, onSuggestionClick }: Prop
                     }`}
                   >
                     <div className={styles.content}>
-                      {msg.content ? msg.content.split('\n').map((line, i, arr) => (
-                        <span key={i}>
-                          {line}
-                          {i < arr.length - 1 && <br />}
-                        </span>
-                      )) : null}
-                      {msg.isLoading && msg.role === 'assistant' && (
-                        <span className="streaming-cursor"></span>
-                      )}
+                      {msg.role === 'assistant' ? (
+                        <StreamingText
+                          content={msg.content}
+                          isStreaming={!!msg.isLoading}
+                        />
+                      ) : msg.content ? (
+                        msg.content.split('\n').map((line, i, arr) => (
+                          <span key={i}>
+                            {line}
+                            {i < arr.length - 1 && <br />}
+                          </span>
+                        ))
+                      ) : null}
                     </div>
 
                     {chartPreview && (
