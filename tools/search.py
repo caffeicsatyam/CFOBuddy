@@ -4,13 +4,11 @@ import time
 from functools import lru_cache
 
 from dotenv import load_dotenv
+from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import tool
 from llama_index.core import Settings, VectorStoreIndex
-from llama_index.core.query_engine import RetrieverQueryEngine
-from llama_index.core.vector_stores import MetadataFilters, ExactMatchFilter
-from llama_index.llms.groq import Groq
+from llama_index.core.vector_stores import ExactMatchFilter, MetadataFilters
 from llama_index.vector_stores.postgres import PGVectorStore
-from langchain_core.runnables import RunnableConfig
 from pydantic import BaseModel
 from sqlalchemy import make_url
 
@@ -60,11 +58,18 @@ def _configure_settings() -> None:
 
     groq_api_key = os.getenv("GROQ_API_KEY")
     if groq_api_key:
-        Settings.llm = Groq(
-            model="llama-3.1-8b-instant",
-            api_key=groq_api_key,
-            temperature=0.2,
-        )
+        try:
+            from llama_index.llms.groq import Groq
+
+            Settings.llm = Groq(
+                model="llama-3.1-8b-instant",
+                api_key=groq_api_key,
+                temperature=0.2,
+            )
+        except ImportError:
+            logger.warning(
+                "llama_index Groq LLM package is unavailable. Using default or fallback LLM."
+            )
 
     _settings_configured = True
 
