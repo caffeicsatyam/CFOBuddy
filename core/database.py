@@ -24,7 +24,7 @@ async def connect_to_mongo():
     # Verify connectivity early so we get a clear error at startup
     try:
         await db_instance.client.admin.command("ping")
-        print(f"Connected to MongoDB at {MONGODB_URL}")
+        print("Connected to MongoDB")
     except Exception as e:
         print(f"⚠ MongoDB connection failed: {e}")
         print("  Auth endpoints that require the database will return errors.")
