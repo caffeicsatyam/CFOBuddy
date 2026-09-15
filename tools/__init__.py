@@ -37,7 +37,9 @@ basic_tools = [
     get_sql_examples,
     generate_chart, 
     prepare_chart_data,
-    sql_query
+    sql_query,
+    get_financial_data,
+    web_search,
 ]
 internal_tool_node = ToolNode(basic_tools)
 

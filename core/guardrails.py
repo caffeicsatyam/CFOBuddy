@@ -44,8 +44,20 @@ BLOCKED_NON_FINANCE_PATTERNS: tuple[str, ...] = (
 )
 
 IN_SCOPE_CHAT_PATTERNS: tuple[str, ...] = (
-    r"\b(?:finance|financial|cfo|accounting|revenue|sales|income|expense|profit(?:ability|able)?|loss|p&l|pnl|ebitda|ebit|cash(?:\s+flow)?|balance\s+sheet|asset|liabilit(?:y|ies)|equity|budget(?:ing)?|forecast(?:ing)?|tax(?:es)?|invoice|vendor|customer|accounts?\s+(?:payable|receivable)|transaction|payment|spend|cost(?:s)?|payroll|audit|ledger|trial\s+balance|depreciation|amortization|working\s+capital|liquidity|solvency|stock|share(?:s)?|market|ticker|price|earnings|dividend|valuation|portfolio|investment|investor|return(?:s)?|loan|debt|interest|credit|bank(?:ing)?|currency|exchange\s+rate|financial\s+ratio|kpi|quarter|fiscal|annual\s+report)\b",
+    # Core finance, accounting & corporate terms
+    r"\b(?:finance|financial|cfo|accounting|revenue|sales|income|expense|profit(?:ability|able)?|loss|p&l|pnl|ebitda|ebit|cash(?:\s+flow)?|balance\s+sheet|asset|liabilit(?:y|ies)|equity|budget(?:ing)?|forecast(?:ing)?|tax(?:es)?|invoice|vendor|customer|accounts?\s+(?:payable|receivable)|transaction|payment|spend|cost(?:s)?|payroll|audit|ledger|trial\s+balance|depreciation|amortization|working\s+capital|liquidity|solvency)\b",
+    # Markets, stocks, trading & investment
+    r"\b(?:stock|share(?:s)?|market|ticker|price|earnings|dividend|valuation|portfolio|investment|investor|return(?:s)?|loan|debt|interest|credit|bank(?:ing)?|currency|exchange\s+rate|financial\s+ratio|kpi|quarter|fiscal|annual\s+report|ipo|listing|delisting|public\s+offering|buyback|split|merger|acquisition|m&a|takeover|divestiture|spinoff|spin[\s-]?off)\b",
+    # Mutual funds, ETFs, indices, crypto
+    r"\b(?:mutual\s+fund|etf|index|indices|nifty|sensex|nasdaq|s&p|dow\s+jones|ftse|benchmark|nav|aum|sip|crypto|bitcoin|btc|ethereum|eth|blockchain|defi|nft)\b",
+    # Economic & macro terms
+    r"\b(?:gdp|inflation|deflation|recession|monetary\s+policy|fiscal\s+policy|interest\s+rate|fed|rbi|central\s+bank|cpi|ppi|unemployment|trade\s+deficit|surplus|subsidy|tariff|bond|yield|treasury|sovereign|forex|commodity|crude\s+oil|gold|silver|copper)\b",
+    # Company/sector analysis keywords
+    r"\b(?:sector|industry|compan(?:y|ies)|startup|unicorn|conglomerate|subsidiary|holding\s+company|blue\s+chip|mid[\s-]?cap|small[\s-]?cap|large[\s-]?cap|penny\s+stock|growth\s+stock|value\s+stock|analyst|rating|target\s+price|consensus|guidance|outlook|forecast|estimate|quarterly|annual|yoy|y-o-y|qoq|q-o-q|cagr|margin|ratio|pe|p/e|p/b|roe|roa|roce|eps|book\s+value|face\s+value|market\s+cap|enterprise\s+value)\b",
+    # File/data/upload references
     r"\b(?:uploaded|upload|file|files|document|documents|dataset|data(?:set)?|csv|xlsx|excel|pdf|docx|table|tables|column|columns|row|rows|schema|chart|graph|visuali[sz]e|plot)\b",
+    # General financial question patterns — "when will X IPO", "how is Y performing", etc.
+    r"(?:when|what|how|will|is|are|should|can|could|does|did|which)\b.{0,60}\b(?:ipo|list(?:ing|ed)?|stock|share|price|revenue|profit|valuation|market|earning|quarter|annual|grow(?:th|ing)?|perform(?:ance|ing)?|invest|fund|return|acqui(?:re|sition)|merg(?:e|er|ing)|split|dividend|buyback|debt|loan|bond|rate|inflation|gdp|forecast|outlook|financ(?:e|ial|ials)|report|result|analys(?:is|e)|trade|trad(?:e|ing)|buy|sell|hold|rally|crash|correction|bull|bear)\b",
 )
 
 IN_SCOPE_CONVERSATIONAL_MESSAGES = frozenset(
@@ -131,12 +143,6 @@ def validate_chat_input(message: str | None) -> GuardrailResult:
         re.search(pattern, content, re.IGNORECASE | re.DOTALL)
         for pattern in FINANCIAL_ADVICE_PATTERNS
     )
-    if not financial_advice_request and not is_in_scope_chat_request(content):
-        return GuardrailResult(
-            GuardrailAction.BLOCK,
-            "out_of_scope_request",
-            "CFO Buddy can help with financial analysis, financial data, market information, and uploaded financial documents.",
-        )
 
     if financial_advice_request:
         return GuardrailResult(
