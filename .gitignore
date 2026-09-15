@@ -43,3 +43,4 @@ templates/
 .claude
 .agents
 .vscode
+.pytest_cache/

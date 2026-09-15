@@ -59,19 +59,29 @@ app = FastAPI(
     version="1.0.0",
 )
 
+cors_origins = [
+    "http://localhost:3000",
+    "http://localhost:3001",
+    "http://localhost:5173",
+    "http://127.0.0.1:3000",
+    "http://127.0.0.1:3001",
+    "http://127.0.0.1:5173",
+]
+for env_key in ("FRONTEND_URL", "ALLOWED_ORIGINS"):
+    val = os.getenv(env_key, "").strip()
+    if val:
+        for u in val.split(","):
+            u_clean = u.strip().rstrip("/")
+            if u_clean and u_clean not in cors_origins:
+                cors_origins.append(u_clean)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://localhost:3001",
-        "http://localhost:5173",
-        "http://127.0.0.1:3000",
-        "http://127.0.0.1:3001",
-        "http://127.0.0.1:5173",
-    ],
+    allow_origins=cors_origins,
     allow_origin_regex=(
         r"https?://("
         r"localhost|127\.0\.0\.1|"
+        r".*\.vercel\.app|"
         r"192\.168\.\d+\.\d+|"
         r"10\.\d+\.\d+\.\d+|"
         r"172\.(1[6-9]|2\d|3[0-1])\.\d+\.\d+"
@@ -732,6 +742,7 @@ async def get_indexing_status(payload: dict[str, Any] = Depends(require_auth)) -
     return _get_indexing_status(str(payload.get("sub", AUTH_USERNAME)))
 
 @app.get("/charts/{filename}", tags=["Charts"])
+@app.get("/api/charts/{filename}", tags=["Charts"])
 async def serve_chart(filename: str) -> FastAPIFileResponse:
     chart_path = CHARTS_FOLDER / Path(filename).name
     if not chart_path.exists() or not chart_path.is_file():

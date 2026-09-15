@@ -1,4 +1,4 @@
-﻿services:
+services:
   mongodb:
     image: mongo:7.0
     container_name: cfobuddy-mongo
@@ -53,6 +53,7 @@
       - "3000:3000"
     environment:
       - NEXT_PUBLIC_API_URL=http://localhost:8000
+      - BACKEND_INTERNAL_URL=http://backend:8000
     depends_on:
       backend:
         condition: service_healthy

@@ -89,7 +89,7 @@ def _create_chart_html(
             go.Pie(
                 labels=x_values,
                 values=y_values,
-                hole=0.35,          # donut style — easier to read than full pie
+                hole=0.35,          
                 textinfo="label+percent",
                 hovertemplate="%{label}: %{value:,.2f} (%{percent})<extra></extra>",
             )

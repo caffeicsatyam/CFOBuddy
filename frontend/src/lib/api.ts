@@ -15,9 +15,17 @@ const LEGACY_API_KEY = process.env.NEXT_PUBLIC_API_KEY ?? '';
 const AUTH_TOKEN_KEY = 'cfobuddy.auth.token';
 
 export function getApiBaseUrl(): string {
-  // Use Next.js rewrites to proxy API requests to the backend.
-  // This bypasses Windows Firewall issues when accessing from LAN,
-  // and prevents IPv6 vs IPv4 resolution issues on localhost.
+  // If an external production URL is configured, use it directly to allow uninterrupted SSE streaming.
+  // In local dev or container environments, default to '/api' to leverage Next.js rewrite proxy.
+  const envUrl = process.env.NEXT_PUBLIC_API_URL?.trim();
+  if (
+    envUrl &&
+    envUrl.startsWith('http') &&
+    !envUrl.includes('localhost') &&
+    !envUrl.includes('127.0.0.1')
+  ) {
+    return envUrl.replace(/\/$/, '');
+  }
   return '/api';
 }
 
