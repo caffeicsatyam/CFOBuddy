@@ -34,7 +34,6 @@ def load_dataframes(folder="data"):
             logger.warning("Could not load %s: %s", filename, e)
     return dataframes
 
-dataframes = load_dataframes()
 
 @tool
 def exact_lookup(file_name: str, column: str, value: str, config: RunnableConfig) -> str:

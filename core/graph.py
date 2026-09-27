@@ -169,19 +169,6 @@ class PromptConfig(BaseModel):
     - Acknowledge limitations if search doesn't help
     """
 
-        router: str = """
-    You are a routing assistant. Classify the user's message into exactly one route.
-
-    Routes:
-    - sql      → any data question requiring math, aggregation, filtering, or SQL on internal CSV/DB tables
-    - finance  → live stock prices, company financials, market data, analyst ratings, public company news
-    - web      → financial market or public-company news not tied to a specific stock
-    - model    → everything else: document search, file listings, greetings, lookups, or unclear queries
-
-    Respond ONLY with a JSON object: {"route": "<sql|finance|web|model>"}
-    No explanation. No markdown fences.
-    """
-
         model_config = {"frozen": True}
 
 
@@ -196,40 +183,6 @@ llm_with_tools = llm.bind_tools(basic_tools, parallel_tool_calls=False, tool_cho
 llm_finance    = llm.bind_tools(finance_tools, parallel_tool_calls=False, tool_choice="auto")
 llm_sql        = llm.bind_tools(sql_tools_list, parallel_tool_calls=False, tool_choice="auto")
 llm_web_search = llm.bind_tools(web_search_tools, parallel_tool_calls=False)
-
-llm_router = llm
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# LLM-BASED ROUTER
-# ══════════════════════════════════════════════════════════════════════════════
-
-_ROUTE_MAP = {
-    "sql":     RouteTarget.SQL.value,
-    "finance": RouteTarget.FINANCE.value,
-    "web":     RouteTarget.WEB_SEARCH.value,
-    "model":   RouteTarget.MODEL.value,
-}
-
-
-def llm_route(message_content: str) -> str:
-    """
-    Ask the LLM to classify the query into a route.
-    Falls back to RouteTarget.MODEL if parsing fails.
-    """
-    import json
-
-    try:
-        response = llm_router.invoke([
-            SystemMessage(content=_prompts.router),
-            HumanMessage(content=message_content),
-        ])
-        raw = response.content.strip()
-        parsed = json.loads(raw)
-        route_key = parsed.get("route", "model")
-        return _ROUTE_MAP.get(route_key, RouteTarget.MODEL.value)
-    except Exception:
-        return RouteTarget.MODEL.value
 
 
 # ══════════════════════════════════════════════════════════════════════════════
