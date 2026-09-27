@@ -19,7 +19,7 @@ class RouterDecision(BaseModel):
 
 class State(MessagesState):
     """Graph state - extends MessagesState with any custom fields."""
-    tool_call_count: int = 0
-    guardrail_blocked: bool = False
-    routing_target: str = "model"
-    routing_latency_ms: float = 0.0
+    tool_call_count: int
+    guardrail_blocked: bool
+    routing_target: str
+    routing_latency_ms: float
