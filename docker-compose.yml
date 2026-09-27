@@ -24,7 +24,7 @@ services:
     environment:
       - MONGODB_URL=mongodb://mongodb:27017
       - MONGODB_DB_NAME=cfobuddy
-      - LLM_MODEL_NAME=
+      - LLM_MODEL_NAME=${LLM_MODEL_NAME:-openai/gpt-oss-120b}
       - GROQ_API_KEY=
       - DATABASE_URL=
       - TWELVE_DATA_API_KEY=

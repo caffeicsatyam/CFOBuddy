@@ -57,7 +57,7 @@ class ObservabilityCallbackHandler(BaseCallbackHandler):
         self.completion_tokens: int = 0
         self.total_tokens: int = 0
         self.total_llm_latency_ms: float = 0.0
-        self.model_name: str = os.getenv("LLM_MODEL_NAME", "llama-3.3-70b-versatile")
+        self.model_name: str = os.getenv("LLM_MODEL_NAME", "openai/gpt-oss-120b")
 
     def on_llm_start(
         self, serialized: dict[str, Any], prompts: list[str], *, run_id: Any, **kwargs: Any
@@ -183,7 +183,7 @@ async def record_query_telemetry(
     p_tokens = callback_handler.prompt_tokens if callback_handler else 0
     c_tokens = callback_handler.completion_tokens if callback_handler else 0
     t_tokens = callback_handler.total_tokens if callback_handler else 0
-    model = callback_handler.model_name if callback_handler else os.getenv("LLM_MODEL_NAME", "llama-3.3-70b-versatile")
+    model = callback_handler.model_name if callback_handler else os.getenv("LLM_MODEL_NAME", "openai/gpt-oss-120b")
     llm_latency_ms = round(callback_handler.total_llm_latency_ms, 2) if callback_handler else 0.0
     tool_calls = callback_handler.tool_calls if callback_handler else []
     total_tool_latency_ms = round(sum(t.get("latency_ms", 0.0) for t in tool_calls), 2)
