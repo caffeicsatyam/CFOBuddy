@@ -1,0 +1,39 @@
+name: Keep Render Backend Awake
+
+on:
+  schedule:
+    # Runs every 14 minutes to prevent Render's 15-minute free tier spin-down
+    - cron: '*/14 * * * *'
+  workflow_dispatch:
+    inputs:
+      backend_url:
+        description: 'Optional backend URL to ping (overrides secret/var)'
+        required: false
+        default: ''
+
+jobs:
+  keep-alive:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Backend Health Endpoint
+        env:
+          CONFIGURED_URL: ${{ inputs.backend_url || secrets.RENDER_BACKEND_URL || vars.RENDER_BACKEND_URL }}
+        run: |
+          TARGET="${CONFIGURED_URL:-https://cfobuddy.onrender.com}"
+          # Strip trailing slashes and ensure /health path
+          CLEAN_URL="${TARGET%/}"
+          if [[ "$CLEAN_URL" != */health ]]; then
+            CLEAN_URL="${CLEAN_URL}/health"
+          fi
+
+          echo "Pinging health endpoint: $CLEAN_URL"
+          RESPONSE=$(curl -s -w "\nHTTP_STATUS:%{http_code}\nTIME_TOTAL:%{time_total}s" --max-time 60 "$CLEAN_URL" || echo -e "\nHTTP_STATUS:000\nTIME_TOTAL:timeout")
+          
+          echo "$RESPONSE"
+          
+          STATUS=$(echo "$RESPONSE" | grep "HTTP_STATUS" | cut -d':' -f2)
+          if [ "$STATUS" = "200" ]; then
+            echo "Success: Render backend is awake and healthy."
+          else
+            echo "Notice: Endpoint returned status $STATUS (Backend may be warming up or URL needs configuration in repo secrets)."
+          fi
